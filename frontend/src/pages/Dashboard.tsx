@@ -1,161 +1,306 @@
-import Layout from '../components/Layout';
-import React, { useEffect, useState } from 'react';
+import React from "react";
+import Layout from "../components/Layout";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 type Listing = {
   id: number;
   title: string;
-  description: string;
+  description?: string;
   price: number;
   currency: string;
   location: string;
-  property_type: 'apartment'|'house'|'villa'|'land'|'other';
+  property_type: string;
+  conditions?: string;
 };
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+function formatMoney(n: number, currency: string) {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(Number(n));
+  } catch {
+    return `${currency}${Number(n).toLocaleString()}`;
+  }
+}
 
 export default function Dashboard() {
-  const [listings, setListings] = useState<Listing[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = React.useState<Listing[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [err, setErr] = React.useState<string | undefined>();
+  const [editing, setEditing] = React.useState<Listing | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
+  const token = typeof window !== "undefined" ? localStorage.getItem("jwt") : null;
 
-  // edit state
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [draft, setDraft] = useState<Partial<Listing>>({});
-
-  async function fetchListings() {
+  async function fetchMine() {
+    setLoading(true);
+    setErr(undefined);
     try {
-      setLoading(true);
-      setError(null);
       const res = await fetch(`${API_URL}/api/listings/mine`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('jwt') || ''}` },
+        headers: { Authorization: token ? `Bearer ${token}` : "" },
       });
       if (!res.ok) throw new Error(await res.text());
-      const data = await res.json(); // array of rows with snake_case
-      setListings(data);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load listings');
+      const data = await res.json(); // { rows: [...] }
+      setItems(data.rows ?? []);
+    } catch (e: any) {
+      setErr(e.message || "Failed to load listings.");
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    fetchListings();
+  React.useEffect(() => {
+    fetchMine();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function startEdit(l: Listing) {
-    setEditingId(l.id);
-    setDraft({
-      id: l.id,
-      title: l.title,
-      description: l.description,
-      price: l.price,
-      currency: l.currency,
-      location: l.location,
-      property_type: l.property_type,
-    });
-  }
-
-  function cancelEdit() {
-    setEditingId(null);
-    setDraft({});
-  }
-
-  async function saveEdit() {
-    if (editingId == null) return;
+  async function onDelete(id: number) {
+    if (!confirm("Delete this listing? This cannot be undone.")) return;
     try {
-      const res = await fetch(`${API_URL}/api/listings/${editingId}`, {
-        method: 'PUT',
-        headers: {
-          'content-type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('jwt') || ''}`,
-        },
-        body: JSON.stringify({
-          title: draft.title,
-          description: draft.description,
-          price: draft.price,
-          currency: draft.currency,
-          location: draft.location,
-          propertyType: draft.property_type, // server expects enum type
-        }),
+      const res = await fetch(`${API_URL}/api/listings/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: token ? `Bearer ${token}` : "" },
       });
       if (!res.ok) throw new Error(await res.text());
-      const updated = await res.json();
-      setListings(ls => ls.map(l => (l.id === updated.id ? updated : l)));
-      cancelEdit();
-    } catch (e:any) {
-      alert(e.message || 'Save failed');
+      setItems((prev) => prev.filter((l) => l.id !== id));
+    } catch (e: any) {
+      alert(e.message || "Delete failed");
     }
   }
 
-  async function deleteListing(id: number) {
-    if (!confirm('Delete this listing?')) return;
+  async function onSave(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!editing) return;
+    setSubmitting(true);
+    const form = new FormData(e.currentTarget);
+    const payload = {
+      title: String(form.get("title") || "").trim(),
+      description: String(form.get("description") || ""),
+      price: Number(form.get("price") || 0),
+      currency: String(form.get("currency") || "INR"),
+      location: String(form.get("location") || "").trim(),
+      property_type: String(form.get("property_type") || "apartment"),
+      conditions: String(form.get("conditions") || ""),
+    };
+
     try {
-      const res = await fetch(`${API_URL}/api/listings/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${localStorage.getItem('jwt') || ''}` },
+      const res = await fetch(`${API_URL}/api/listings/${editing.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(await res.text());
-      setListings(ls => ls.filter(l => l.id !== id));
-    } catch (err:any) {
-      alert(err.message || 'Delete failed');
+      setEditing(null);
+      await fetchMine();
+    } catch (e: any) {
+      alert(e.message || "Update failed");
+    } finally {
+      setSubmitting(false);
     }
   }
 
   return (
     <Layout>
-      <h2>My Listings</h2>
-      {loading && <p>Loading...</p>}
-      {error && <p style={{ color: 'crimson' }}>{error}</p>}
+      {/* Header */}
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">My Listings</h1>
+          <p className="mt-1 text-sm text-gray-600">
+            Manage your properties. Edit details or remove listings you no longer want visible.
+          </p>
+        </div>
+        <a
+          href="/new"
+          className="inline-flex items-center rounded-md bg-brand-600 px-4 py-2 text-white text-sm font-medium shadow-sm hover:bg-brand-700"
+        >
+          + New Listing
+        </a>
+      </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:12 }}>
-        {listings.map(l => {
-          const isEditing = editingId === l.id;
-          return (
-            <div key={l.id} style={{ border:'1px solid #ddd', padding:12, borderRadius:8 }}>
-              {!isEditing ? (
-                <>
-                  <h3>{l.title}</h3>
-                  <p>{l.location} · {l.property_type} · {l.currency}{Number(l.price).toLocaleString()}</p>
-                  <p>{l.description}</p>
-                  <div style={{ display:'flex', gap:8 }}>
-                    <button onClick={() => deleteListing(l.id)}>Delete</button>
-                    <button onClick={() => startEdit(l)}>Edit</button>
+      {/* States */}
+      {err && (
+        <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {err}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[...Array(6)].map((_, i) => (
+            <div
+              key={i}
+              className="h-40 rounded-xl border bg-white p-4 shadow-sm animate-pulse"
+            >
+              <div className="h-5 w-40 rounded bg-gray-200" />
+              <div className="mt-3 h-4 w-56 rounded bg-gray-200" />
+              <div className="mt-2 h-4 w-44 rounded bg-gray-200" />
+              <div className="mt-6 h-8 w-24 rounded bg-gray-200" />
+            </div>
+          ))}
+        </div>
+      ) : items.length === 0 ? (
+        <div className="rounded-xl border border-dashed bg-white p-10 text-center">
+          <h3 className="text-lg font-semibold text-gray-900">No listings yet</h3>
+          <p className="mt-1 text-sm text-gray-600">
+            Create your first property listing to get started.
+          </p>
+          <a
+            href="/new"
+            className="mt-4 inline-flex items-center rounded-md bg-brand-600 px-4 py-2 text-white text-sm font-medium hover:bg-brand-700"
+          >
+            Create Listing
+          </a>
+        </div>
+      ) : (
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((l) => (
+            <article
+              key={l.id}
+              className="group relative rounded-xl border bg-white p-5 shadow-sm transition hover:shadow-md"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="text-base font-semibold text-gray-900 group-hover:text-brand-700">
+                  {l.title}
+                </h3>
+                <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700">
+                  {l.property_type}
+                </span>
+              </div>
+
+              <p className="mt-1 text-sm text-gray-600 line-clamp-2">
+                {l.description || "No description."}
+              </p>
+
+              <div className="mt-3 text-sm text-gray-700">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{l.location}</span>
+                  <span className="text-gray-400">•</span>
+                  <span className="font-medium">
+                    {formatMoney(l.price, l.currency)}
+                  </span>
+                </div>
+                {l.conditions && (
+                  <div className="mt-1 text-gray-500">Conditions: {l.conditions}</div>
+                )}
+              </div>
+
+              <div className="mt-4 flex items-center gap-2">
+                <button
+                  onClick={() => setEditing(l)}
+                  className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => onDelete(l.id)}
+                  className="inline-flex items-center rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50"
+                >
+                  Delete
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {/* Edit dialog */}
+      {editing && (
+        <div className="fixed inset-0 z-50">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => (submitting ? null : setEditing(null))}
+          />
+          <div className="absolute inset-0 grid place-items-center p-4">
+            <div className="w-full max-w-xl rounded-2xl bg-white shadow-xl">
+              <div className="flex items-center justify-between border-b px-5 py-4">
+                <h3 className="text-lg font-semibold text-gray-900">Edit Listing</h3>
+                <button
+                  className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100"
+                  onClick={() => setEditing(null)}
+                  disabled={submitting}
+                  title="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={onSave} className="px-5 pb-5 pt-4 space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Title
+                    </label>
+                    <input
+                      name="title"
+                      defaultValue={editing.title}
+                      required
+                      className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+                    />
                   </div>
-                </>
-              ) : (
-                <>
-                  <h3>Edit Listing</h3>
-                  <div style={{ display:'grid', gap:8 }}>
-                    <input
-                      placeholder="Title"
-                      value={draft.title ?? ''}
-                      onChange={e => setDraft(d => ({ ...d, title: e.target.value }))}
-                    />
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Description
+                    </label>
                     <textarea
-                      placeholder="Description"
-                      value={draft.description ?? ''}
-                      onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
+                      name="description"
+                      defaultValue={editing.description || ""}
+                      rows={4}
+                      className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Price
+                    </label>
                     <input
+                      name="price"
                       type="number"
-                      placeholder="Price"
-                      value={draft.price ?? ''}
-                      onChange={e => setDraft(d => ({ ...d, price: Number(e.target.value) }))}
+                      min={0}
+                      step="1"
+                      defaultValue={editing.price}
+                      required
+                      className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Currency
+                    </label>
                     <input
-                      placeholder="Currency"
-                      value={draft.currency ?? 'INR'}
-                      onChange={e => setDraft(d => ({ ...d, currency: e.target.value }))}
+                      name="currency"
+                      defaultValue={editing.currency || "INR"}
+                      className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Location
+                    </label>
                     <input
-                      placeholder="Location"
-                      value={draft.location ?? ''}
-                      onChange={e => setDraft(d => ({ ...d, location: e.target.value }))}
+                      name="location"
+                      defaultValue={editing.location}
+                      required
+                      className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Property Type
+                    </label>
                     <select
-                      value={draft.property_type ?? 'apartment'}
-                      onChange={e => setDraft(d => ({ ...d, property_type: e.target.value as Listing['property_type'] }))}
+                      name="property_type"
+                      defaultValue={editing.property_type}
+                      className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
                     >
                       <option>apartment</option>
                       <option>house</option>
@@ -164,16 +309,41 @@ export default function Dashboard() {
                       <option>other</option>
                     </select>
                   </div>
-                  <div style={{ display:'flex', gap:8, marginTop:8 }}>
-                    <button onClick={saveEdit}>Save</button>
-                    <button onClick={cancelEdit}>Cancel</button>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Conditions (optional)
+                    </label>
+                    <input
+                      name="conditions"
+                      defaultValue={editing.conditions || ""}
+                      className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+                    />
                   </div>
-                </>
-              )}
+                </div>
+
+                <div className="mt-3 flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    className="rounded-md border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    onClick={() => setEditing(null)}
+                    disabled={submitting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="inline-flex items-center rounded-md bg-brand-600 px-4 py-2 text-white text-sm font-medium hover:bg-brand-700 disabled:opacity-60"
+                  >
+                    {submitting ? "Saving…" : "Save changes"}
+                  </button>
+                </div>
+              </form>
             </div>
-          );
-        })}
-      </div>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }
