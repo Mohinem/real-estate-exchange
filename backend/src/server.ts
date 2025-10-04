@@ -177,6 +177,139 @@ app.post('/messages', async (req, res) => {
   } catch (e:any) { console.error(e); res.status(400).json({ error: String(e.message || e) }); }
 });
 
+// Get current user listings
+app.get('/api/listings/mine', async (req, res) => {
+    const auth = (req as any).jwt || { role: 'anonymous' };
+    try {
+      const rows = await withRlsClient(auth, client =>
+        client.query('select * from app_public.listings where owner_id = current_setting(\'jwt.claims.user_id\', true)::int')
+      );
+      res.json(rows.rows);
+    } catch (e) {
+      console.error(e);
+      res.status(500).send('Error fetching listings');
+    }
+  });
+  
+  // Delete a listing
+  app.delete('/api/listings/:id', async (req, res) => {
+    const auth = (req as any).jwt || { role: 'anonymous' };
+    const { id } = req.params;
+    try {
+      await withRlsClient(auth, client =>
+        client.query('delete from app_public.listings where id = $1', [id])
+      );
+      res.json({ success: true });
+    } catch (e) {
+      console.error(e);
+      res.status(500).send('Error deleting listing');
+    }
+  });  
+
+// Update a listing (owner only via RLS)
+app.put('/api/listings/:id', async (req, res) => {
+    const auth = (req as any).jwt || { role: 'anonymous' };
+    if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
+  
+    const { id } = req.params;
+    const {
+      title, description, price, currency, location,
+      propertyType, conditions, contactInfo,
+    } = req.body ?? {};
+  
+    try {
+      const row = await withRlsClient(auth, async client => {
+        const r = await client.query(
+          `
+          update app_public.listings set
+            title         = coalesce($2, title),
+            description   = coalesce($3, description),
+            price         = coalesce($4, price),
+            currency      = coalesce($5, currency),
+            location      = coalesce($6, location),
+            property_type = coalesce($7::app_public.property_type, property_type),
+            conditions    = coalesce($8, conditions),
+            contact_info  = coalesce($9, contact_info),
+            updated_at    = now()
+          where id = $1
+          returning id, title, description, price, currency, location, property_type, conditions, contact_info
+          `,
+          [
+            Number(id),
+            title ?? null,
+            description ?? null,
+            price != null ? Number(price) : null,
+            currency ?? null,
+            location ?? null,
+            propertyType ?? null,
+            conditions ?? null,
+            contactInfo ?? null,
+          ]
+        );
+        return r.rows[0];
+      });
+  
+      if (!row) return res.status(404).json({ error: 'not found' });
+      res.json(row);
+    } catch (e:any) {
+      console.error(e);
+      res.status(400).json({ error: e.message || String(e) });
+    }
+  });  
+
+// Update a listing
+app.put('/api/listings/:id', async (req, res) => {
+    const auth = (req as any).jwt || { role: 'anonymous' };
+    if (auth.role === 'anonymous') {
+      return res.status(401).json({ error: 'Login required' });
+    }
+  
+    const { id } = req.params;
+    const {
+      title, description, price, currency, location,
+      propertyType, conditions, contactInfo
+    } = req.body || {};
+  
+    try {
+      const row = await withRlsClient(auth, async client => {
+        const r = await client.query(
+          `
+          update app_public.listings set
+            title = coalesce($2, title),
+            description = coalesce($3, description),
+            price = coalesce($4, price),
+            currency = coalesce($5, currency),
+            location = coalesce($6, location),
+            property_type = coalesce($7::app_public.property_type, property_type),
+            conditions = coalesce($8, conditions),
+            contact_info = coalesce($9, contact_info),
+            updated_at = now()
+          where id = $1
+          returning id, title, description, price, currency, location, property_type, conditions, contact_info
+          `,
+          [
+            Number(id),
+            title ?? null,
+            description ?? null,
+            price != null ? Number(price) : null,
+            currency ?? null,
+            location ?? null,
+            propertyType ?? null,
+            conditions ?? null,
+            contactInfo ?? null,
+          ]
+        );
+        return r.rows[0];
+      });
+  
+      if (!row) return res.status(404).json({ error: 'Not found' });
+      res.json(row);
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ error: err.message || 'Update failed' });
+    }
+  });
+
 // ------------ START -------------
 const port = Number(process.env.PORT || 8080);
 app.listen(port, () => console.log(`API ready on :${port}`));
