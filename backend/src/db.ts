@@ -11,15 +11,17 @@ export async function withRlsClient<T>(auth: AuthCtx, fn: (client: PoolClient)=>
   const client = await pool.connect();
   try {
     await client.query('begin');
-    // Set role + claims; use LOCAL so it auto-resets on commit
+
+    // SET ROLE cannot be parameterized, but we whitelist the values via the type.
     await client.query(`set local role ${auth.role}`);
+
+    // Use set_config() so we can bind parameters safely.
     if (auth.user_id != null) {
-      await client.query(`set local "jwt.claims.user_id" = $1`, [String(auth.user_id)]);
-      await client.query(`set local "jwt.claims.role" = $1`, [auth.role]);
-    } else {
-      await client.query(`set local "jwt.claims.user_id" to default`);
-      await client.query(`set local "jwt.claims.role" to default`);
+      await client.query(`select set_config('jwt.claims.user_id', $1, true)`, [String(auth.user_id)]);
+      await client.query(`select set_config('jwt.claims.role', $1, true)`, [auth.role]);
     }
+    // If no user_id, we just don't set the claims — current_setting(..., true) will return NULL in RLS checks.
+
     const result = await fn(client);
     await client.query('commit');
     return result;
