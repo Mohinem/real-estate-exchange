@@ -19,7 +19,7 @@ type Listing = {
 };
 
 export default function Home() {
-  const [filters, setFilters] = React.useState<any>({});
+  const [filters, setFilters] = React.useState<Record<string, any>>({});
   const [items, setItems] = React.useState<Listing[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | undefined>();
@@ -40,7 +40,6 @@ export default function Home() {
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json(); // { items: [...] }
 
-      // Map DB snake_case -> camelCase expected by ListingCard
       const mapped: Listing[] = (data.items || []).map((l: any) => ({
         id: l.id,
         title: l.title,
@@ -48,7 +47,7 @@ export default function Home() {
         price: l.price,
         currency: l.currency,
         location: l.location,
-        propertyType: l.property_type,     // <—
+        propertyType: l.property_type,
         conditions: l.conditions,
         ownerId: l.owner_id,
         createdAt: l.created_at,
@@ -68,15 +67,45 @@ export default function Home() {
 
   return (
     <Layout>
-      <h2>Browse Properties</h2>
-      <Filters value={filters} onChange={setFilters} />
-      {loading && <div>Loading...</div>}
-      {err && <div style={{ color: 'crimson' }}>{err}</div>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
-        {items.map((l) => (
-          <ListingCard key={l.id} l={l} />
-        ))}
-      </div>
+      {/* Hero */}
+      <section className="bg-gradient-to-b from-white to-blue-50 border-b">
+        <div className="container py-10 sm:py-14">
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-gray-900">
+            Swap or sell properties with confidence
+          </h1>
+          <p className="mt-3 max-w-2xl text-gray-600">
+            Browse listings, propose exchanges, and chat with owners—fast, secure, and simple.
+          </p>
+          <div className="mt-6">
+            <a
+              href="/new"
+              className="inline-flex items-center px-5 py-3 rounded-md bg-brand-600 text-white font-medium hover:bg-brand-700"
+            >
+              Post a listing
+            </a>
+          </div>
+        </div>
+      </section>
+
+      {/* Filters + Grid */}
+      <section className="container py-8">
+        <div className="mb-4">
+          <Filters value={filters} onChange={setFilters} />
+        </div>
+
+        {loading && <div className="text-gray-600">Loading…</div>}
+        {err && <div className="text-red-600">{err}</div>}
+
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((l) => (
+            <ListingCard key={l.id} l={l} />
+          ))}
+        </div>
+
+        {!loading && !err && items.length === 0 && (
+          <div className="mt-6 text-gray-600">No listings match your filters.</div>
+        )}
+      </section>
     </Layout>
   );
 }

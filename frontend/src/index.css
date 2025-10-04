@@ -1,0 +1,25 @@
+/* Tailwind v4 entry point */
+@import "tailwindcss";
+
+/* Scan for class usage */
+@source "../index.html" "./**/*.{ts,tsx,js,jsx}";
+
+/* Define custom brand colors */
+@theme {
+  --color-brand-50:  #eef7ff;
+  --color-brand-100: #d9ecff;
+  --color-brand-200: #baddff;
+  --color-brand-300: #8fc7ff;
+  --color-brand-400: #5faaff;
+  --color-brand-500: #3d8cf7;
+  --color-brand-600: #1f6fe0;
+  --color-brand-700: #1959b5;
+  --color-brand-800: #164a91;
+  --color-brand-900: #143f78;
+}
+
+/* Base page style */
+html, body {
+  background-color: theme(colors.gray.50);
+  color: theme(colors.gray.900);
+}
