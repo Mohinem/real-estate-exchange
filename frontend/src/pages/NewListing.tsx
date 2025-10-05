@@ -71,7 +71,7 @@ export default function NewListing() {
         contact_info: form.contact_info,
       };
 
-      const res = await fetch(`${API_URL}/api/listings`, {
+      const res = await fetch(`${API_URL}/listings`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

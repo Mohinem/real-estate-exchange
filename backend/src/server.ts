@@ -111,21 +111,60 @@ app.get('/listings/:id', async (req, res) => {
 });
 
 app.post('/listings', async (req, res) => {
-  const auth = authFromReq(req); // must be app_user/app_admin
+  const auth = authFromReq(req);
   if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
+
   try {
-    const { title, description, price, currency='INR', location, propertyType, conditions, contactInfo } = req.body ?? {};
+    const b = req.body ?? {};
+
+    // Normalize + validate input (accept both camelCase and snake_case)
+    const payload = {
+      title: String(b.title ?? '').trim(),
+      description: b.description ?? null,
+      price: Number(b.price),
+      currency: String(b.currency ?? 'INR').toUpperCase(),
+      location: String(b.location ?? '').trim(),
+      property_type: String(b.propertyType ?? b.property_type ?? '').toLowerCase(),
+      conditions: b.conditions ?? null,
+      contact_info: b.contactInfo ?? b.contact_info ?? null,
+    };
+
+    // Required fields
+    if (!payload.title || !payload.location || !isFinite(payload.price)) {
+      return res.status(400).json({ error: 'title, location and price are required' });
+    }
+
+    // property_type must be a valid enum value
+    const allowed = new Set(['apartment', 'house', 'villa', 'land', 'other']);
+    if (!allowed.has(payload.property_type)) {
+      return res.status(400).json({ error: 'invalid propertyType (use apartment|house|villa|land|other)' });
+    }
+
     const row = await withRlsClient(auth, async (c) => {
       const r = await c.query(
-        `insert into app_public.listings(title, description, price, currency, location, property_type, conditions, contact_info)
+        `insert into app_public.listings
+           (title, description, price, currency, location, property_type, conditions, contact_info)
          values ($1,$2,$3,$4,$5,$6,$7,$8)
          returning id, title`,
-        [title, description, price, currency, location, propertyType, conditions, contactInfo]
+        [
+          payload.title,
+          payload.description,
+          payload.price,
+          payload.currency,
+          payload.location,
+          payload.property_type,
+          payload.conditions,
+          payload.contact_info,
+        ],
       );
       return r.rows[0];
     });
+
     res.json(row);
-  } catch (e:any) { console.error(e); res.status(400).json({ error: String(e.message || e) }); }
+  } catch (e: any) {
+    console.error(e);
+    res.status(400).json({ error: e.message || String(e) });
+  }
 });
 
 app.get('/listings/:id/suggest', async (req, res) => {

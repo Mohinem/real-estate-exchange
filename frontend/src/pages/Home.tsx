@@ -69,17 +69,17 @@ export default function Home() {
     <Layout>
       {/* Hero */}
       <section className="bg-gradient-to-b from-white to-blue-50 border-b">
-        <div className="container py-10 sm:py-14">
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-gray-900">
+        <div className="max-w-7xl mx-auto px-6 sm:px-10 py-14">
+          <h1 className="text-4xl font-extrabold tracking-tight text-gray-900">
             Swap or sell properties with confidence
           </h1>
-          <p className="mt-3 max-w-2xl text-gray-600">
-            Browse listings, propose exchanges, and chat with owners—fast, secure, and simple.
+          <p className="mt-4 max-w-2xl text-gray-600 text-lg leading-relaxed">
+            Browse listings, propose exchanges, and chat with owners — fast, secure, and simple.
           </p>
-          <div className="mt-6">
+          <div className="mt-8">
             <a
               href="/new"
-              className="inline-flex items-center px-5 py-3 rounded-md bg-brand-600 text-white font-medium hover:bg-brand-700"
+              className="inline-flex items-center px-6 py-3 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition"
             >
               Post a listing
             </a>
@@ -88,23 +88,24 @@ export default function Home() {
       </section>
 
       {/* Filters + Grid */}
-      <section className="container py-8">
-        <div className="mb-4">
+      <section className="max-w-7xl mx-auto px-6 sm:px-10 py-10">
+        <div className="mb-8">
           <Filters value={filters} onChange={setFilters} />
         </div>
 
         {loading && <div className="text-gray-600">Loading…</div>}
         {err && <div className="text-red-600">{err}</div>}
 
-        {/* items-stretch ensures each grid item fills the same row height */}
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 items-stretch mt-6">
+        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3 items-stretch">
           {items.map((l) => (
             <ListingCard key={l.id} l={l} />
           ))}
         </div>
 
         {!loading && !err && items.length === 0 && (
-          <div className="mt-6 text-gray-600">No listings match your filters.</div>
+          <div className="mt-8 text-gray-600 text-center text-lg">
+            No listings match your filters.
+          </div>
         )}
       </section>
     </Layout>
