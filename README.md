@@ -1,4 +1,4 @@
-# RealEstate Exchange — TS/Node/PostGraphile + React/Neon
+# Real Estate Exchange — TS/Node/PostGraphile + React/Neon
 
 
 ## Prereqs

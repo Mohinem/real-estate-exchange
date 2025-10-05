@@ -65,7 +65,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Footer */}
       <footer className="border-t bg-white">
         <div className="container py-6 text-sm text-gray-600 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p>© {new Date().getFullYear()} RealEstate Exchange.</p>
+          <p>© {new Date().getFullYear()} Real Estate Exchange.</p>
           <div className="flex gap-4">
             <a className="hover:text-gray-900" href="#">Terms</a>
             <a className="hover:text-gray-900" href="#">Privacy</a>

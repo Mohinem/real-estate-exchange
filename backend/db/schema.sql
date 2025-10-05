@@ -1,5 +1,5 @@
 -- ====================================================================
--- RealEstate Exchange — schema.sql (idempotent)
+-- Real Estate Exchange — schema.sql (idempotent)
 -- For Express /auth/login + PostGraphile + RLS + FK indexes
 -- ====================================================================
 
