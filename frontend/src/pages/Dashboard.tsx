@@ -10,7 +10,7 @@ type Listing = {
   price: number;
   currency: string;
   location: string;
-  property_type: string;
+  property_type: "apartment" | "house" | "villa" | "land" | "other";
   conditions?: string;
 };
 
@@ -32,18 +32,23 @@ export default function Dashboard() {
   const [err, setErr] = React.useState<string | undefined>();
   const [editing, setEditing] = React.useState<Listing | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
-  const token = typeof window !== "undefined" ? localStorage.getItem("jwt") : null;
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("jwt") : null;
+
+  const authHeader =
+    token ? { Authorization: `Bearer ${token}` } : ({} as Record<string, string>);
 
   async function fetchMine() {
     setLoading(true);
     setErr(undefined);
     try {
+      // server returns a plain array from /api/listings/mine
       const res = await fetch(`${API_URL}/api/listings/mine`, {
-        headers: { Authorization: token ? `Bearer ${token}` : "" },
+        headers: authHeader,
       });
       if (!res.ok) throw new Error(await res.text());
-      const data = await res.json(); // { rows: [...] }
-      setItems(data.rows ?? []);
+      const data = await res.json();
+      setItems(Array.isArray(data) ? data : data?.rows ?? []);
     } catch (e: any) {
       setErr(e.message || "Failed to load listings.");
     } finally {
@@ -61,7 +66,7 @@ export default function Dashboard() {
     try {
       const res = await fetch(`${API_URL}/api/listings/${id}`, {
         method: "DELETE",
-        headers: { Authorization: token ? `Bearer ${token}` : "" },
+        headers: authHeader,
       });
       if (!res.ok) throw new Error(await res.text());
       setItems((prev) => prev.filter((l) => l.id !== id));
@@ -73,16 +78,25 @@ export default function Dashboard() {
   async function onSave(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!editing) return;
+
     setSubmitting(true);
     const form = new FormData(e.currentTarget);
+
+    // Send camelCase keys expected by server.ts (see PUT /api/listings/:id)
     const payload = {
       title: String(form.get("title") || "").trim(),
-      description: String(form.get("description") || ""),
-      price: Number(form.get("price") || 0),
-      currency: String(form.get("currency") || "INR"),
-      location: String(form.get("location") || "").trim(),
-      property_type: String(form.get("property_type") || "apartment"),
-      conditions: String(form.get("conditions") || ""),
+      description: String(form.get("description") || "") || null,
+      price:
+        form.get("price") !== null && form.get("price") !== ""
+          ? Number(form.get("price"))
+          : null,
+      currency: String(form.get("currency") || "") || null,
+      location: String(form.get("location") || "") || null,
+      propertyType:
+        (String(form.get("propertyType") || "") as Listing["property_type"]) ||
+        null,
+      conditions: String(form.get("conditions") || "") || null,
+      // contactInfo is supported by API but not present in this form; omit
     };
 
     try {
@@ -90,7 +104,7 @@ export default function Dashboard() {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: token ? `Bearer ${token}` : "",
+          ...authHeader,
         },
         body: JSON.stringify(payload),
       });
@@ -109,9 +123,12 @@ export default function Dashboard() {
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">My Listings</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+            My Listings
+          </h1>
           <p className="mt-1 text-sm text-gray-600">
-            Manage your properties. Edit details or remove listings you no longer want visible.
+            Manage your properties. Edit details or remove listings you no
+            longer want visible.
           </p>
         </div>
         <a
@@ -185,7 +202,9 @@ export default function Dashboard() {
                   </span>
                 </div>
                 {l.conditions && (
-                  <div className="mt-1 text-gray-500">Conditions: {l.conditions}</div>
+                  <div className="mt-1 text-gray-500">
+                    Conditions: {l.conditions}
+                  </div>
                 )}
               </div>
 
@@ -218,7 +237,9 @@ export default function Dashboard() {
           <div className="absolute inset-0 grid place-items-center p-4">
             <div className="w-full max-w-xl rounded-2xl bg-white shadow-xl">
               <div className="flex items-center justify-between border-b px-5 py-4">
-                <h3 className="text-lg font-semibold text-gray-900">Edit Listing</h3>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Edit Listing
+                </h3>
                 <button
                   className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100"
                   onClick={() => setEditing(null)}
@@ -298,7 +319,7 @@ export default function Dashboard() {
                       Property Type
                     </label>
                     <select
-                      name="property_type"
+                      name="propertyType" // <-- camelCase to match API
                       defaultValue={editing.property_type}
                       className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
                     >
