@@ -12,10 +12,10 @@ type Listing = {
   price: number;
   currency: string;
   location: string;
-  propertyType: string; // mapped from property_type
+  propertyType: string;
   conditions?: string;
-  ownerId?: number;     // mapped from owner_id
-  createdAt?: string;   // mapped from created_at
+  ownerId?: number;
+  createdAt?: string;
 };
 
 export default function Home() {
@@ -38,7 +38,7 @@ export default function Home() {
 
       const res = await fetch(`${API_URL}/listings?${q.toString()}`);
       if (!res.ok) throw new Error(await res.text());
-      const data = await res.json(); // { items: [...] }
+      const data = await res.json();
 
       const mapped: Listing[] = (data.items || []).map((l: any) => ({
         id: l.id,
@@ -96,7 +96,8 @@ export default function Home() {
         {loading && <div className="text-gray-600">Loading…</div>}
         {err && <div className="text-red-600">{err}</div>}
 
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {/* items-stretch ensures each grid item fills the same row height */}
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 items-stretch mt-6">
           {items.map((l) => (
             <ListingCard key={l.id} l={l} />
           ))}
