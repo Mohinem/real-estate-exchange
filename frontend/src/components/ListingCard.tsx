@@ -9,22 +9,43 @@ type Props = {
 export default function ListingCard({ l, bare = false, className = '' }: Props) {
   const price = `${l.currency ?? ''}${Number(l.price).toLocaleString()}`;
 
+  // Flexible owner display name resolution
+  const ownerName =
+    l.owner_display_name ??
+    l.ownerName ??
+    l.owner?.display_name ??
+    l.owner?.displayName ??
+    (l.owner_id ? `User #${l.owner_id}` : 'Seller');
+
   const Inner = () => (
     <>
       {/* image/banner */}
       <div className="h-40 w-full bg-gradient-to-br from-brand-100 to-white" />
+
       {/* body */}
       <div className="flex flex-col flex-1 p-4">
         <h3 className="text-lg font-semibold line-clamp-1">{l.title}</h3>
+
+        {/* owner name */}
+        <div className="mt-0.5 text-xs text-gray-500">by {ownerName}</div>
+
         <div className="mt-1 text-sm text-gray-600 flex flex-wrap gap-x-2">
           <span>{l.location}</span><span>·</span>
-          <span className="capitalize">{l.propertyType}</span><span>·</span>
+          <span className="capitalize">{l.propertyType ?? l.property_type}</span><span>·</span>
           <span className="font-medium text-gray-900">{price}</span>
         </div>
-        {l.description && <p className="mt-2 text-sm text-gray-600 line-clamp-2">{l.description}</p>}
+
+        {l.description && (
+          <p className="mt-2 text-sm text-gray-600 line-clamp-2">{l.description}</p>
+        )}
+
         <div className="flex-1" />
+
         <div className="pt-4">
-          <Link to={`/listing/${l.id}`} className="inline-flex px-3 py-2 text-sm rounded-md border hover:bg-gray-50 transition">
+          <Link
+            to={`/listing/${l.id}`}
+            className="inline-flex px-3 py-2 text-sm rounded-md border hover:bg-gray-50 transition"
+          >
             View details
           </Link>
         </div>
@@ -34,10 +55,11 @@ export default function ListingCard({ l, bare = false, className = '' }: Props) 
 
   if (bare) return <div className={`flex h-full flex-col overflow-hidden ${className}`}><Inner /></div>;
 
-  // NOTE: default includes p-5 + h-[320px] like you set in DevTools
+  // default includes p-5 + h-[320px]
   return (
     <article
       className={`group flex h-[320px] flex-col overflow-hidden rounded-xl border bg-white p-5 shadow-sm transition-shadow hover:shadow-md ${className}`}
+      aria-label={`Listing card for ${l.title} by ${ownerName}`}
     >
       <Inner />
     </article>

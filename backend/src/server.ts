@@ -348,59 +348,106 @@ app.post('/exchange-requests', async (req, res) => {
   }
 });
 
-// ACCEPT (only recipient; row-locked; also creates an exchange contract + reserves both listings)
+// ACCEPT (only recipient; row-locked; creates exchange + reserves both listings)
 app.post('/exchange-requests/:id/accept', async (req, res) => {
   const auth = authFromReq(req);
   if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
 
   const id = Number(req.params.id);
-  const client = await pool.connect();
+
   try {
-    await client.query('begin');
+    const exch = await withRlsClient(auth, async (client) => {
+      await client.query('begin');
 
-    // lock the request
-    const rq = await client.query('select * from app_public.exchange_requests where id=$1 for update', [id]);
-    if (!rq.rowCount) throw new Error('not found');
-    const r = rq.rows[0];
-    if (r.status !== 'pending' && r.status !== 'accepted' /* counter safety */) throw new Error('not pending');
-    if (Number(r.to_user_id) !== Number(auth.user_id)) throw new Error('not your request to accept');
-    if (r.expires_at && new Date(r.expires_at) < new Date()) throw new Error('request expired');
+      // lock the request row
+      const rq = await client.query('select * from app_public.exchange_requests where id=$1 for update', [id]);
+      if (!rq.rowCount) throw new Error('not found');
+      const r = rq.rows[0];
 
-    // lock both listings
-    const A = await client.query('select * from app_public.listings where id=$1 for update', [r.from_listing_id]);
-    const B = await client.query('select * from app_public.listings where id=$1 for update', [r.to_listing_id]);
-    const a = A.rows[0], b = B.rows[0];
-    if (!a?.is_active || a.reserved_exchange_id) throw new Error('counterparty listing unavailable');
-    if (!b?.is_active || b.reserved_exchange_id) throw new Error('your listing unavailable');
+      if (r.status !== 'pending') throw new Error('not pending');
+      if (Number(r.to_user_id) !== Number(auth.user_id)) throw new Error('not your request to accept');
+      if (r.expires_at && new Date(r.expires_at) < new Date()) throw new Error('request expired');
 
-    // create exchange
-    const exch = await client.query(
-      `insert into app_public.exchanges
-        (listing_a_id, listing_b_id, a_user_id, b_user_id, currency, cash_adjustment_a_to_b, status)
-       values ($1,$2,$3,$4,$5,$6,'active') returning *`,
-      [a.id, b.id, a.owner_id, b.owner_id, r.currency, r.cash_adjustment]
-    );
+      // lock both listings
+      const A = await client.query('select * from app_public.listings where id=$1 for update', [r.from_listing_id]);
+      const B = await client.query('select * from app_public.listings where id=$1 for update', [r.to_listing_id]);
+      if (!A.rowCount || !B.rowCount) throw new Error('listing not found');
+      const a = A.rows[0], b = B.rows[0];
+      if (!a.is_active || a.reserved_exchange_id) throw new Error('counterparty listing unavailable');
+      if (!b.is_active || b.reserved_exchange_id) throw new Error('your listing unavailable');
 
-    // reserve both
-    await client.query(
-      `update app_public.listings set reserved_exchange_id=$1 where id in ($2,$3)`,
-      [exch.rows[0].id, a.id, b.id]
-    );
+      // create the exchange (RLS: insert allowed because you're a participant)
+      const er = await client.query(
+        `insert into app_public.exchanges
+          (listing_a_id, listing_b_id, a_user_id, b_user_id, currency, cash_adjustment_a_to_b, status)
+         values ($1,$2,$3,$4,$5,$6,'active')
+         returning *`,
+        [a.id, b.id, a.owner_id, b.owner_id, r.currency, r.cash_adjustment]
+      );
+      const exchange = er.rows[0];
 
-    // mark request accepted
-    await client.query(
-      `update app_public.exchange_requests set status='accepted', updated_at=now() where id=$1`,
-      [id]
-    );
+      // reserve both listings (RLS: allowed by listings_update_participants)
+      await client.query(
+        `update app_public.listings
+           set reserved_exchange_id=$1
+         where id in ($2,$3)`,
+        [exchange.id, a.id, b.id]
+      );
 
-    await client.query('commit');
-    res.json(exch.rows[0]);
+      // mark request accepted
+      await client.query(
+        `update app_public.exchange_requests set status='accepted', updated_at=now() where id=$1`,
+        [id]
+      );
+
+      await client.query('commit');
+      return exchange;
+    });
+
+    res.json(exch);
   } catch (e:any) {
-    await client.query('rollback');
+    // if withRlsClient throws, it already rolled back
     console.error(e);
     res.status(400).json({ error: e.message || String(e) });
-  } finally {
-    client.release();
+  }
+});
+
+app.post('/exchanges/:id/complete', async (req, res) => {
+  const auth = authFromReq(req);
+  if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
+  const id = Number(req.params.id);
+
+  try {
+    await withRlsClient(auth, async (client) => {
+      await client.query('begin');
+
+      const e = await client.query('select * from app_public.exchanges where id=$1 for update', [id]);
+      if (!e.rowCount) throw new Error('not found');
+      const ex = e.rows[0];
+      if (ex.status !== 'active') throw new Error('already finished');
+      if (Number(ex.a_user_id) !== Number(auth.user_id) && Number(ex.b_user_id) !== Number(auth.user_id))
+        throw new Error('not a participant');
+
+      // First update listings (policy allows participants)
+      await client.query(
+        `update app_public.listings
+           set is_active=false, exchanged_at=now(), reserved_exchange_id=null
+         where id in ($1,$2)`,
+        [ex.listing_a_id, ex.listing_b_id]
+      );
+
+      // Then close the exchange
+      await client.query(
+        `update app_public.exchanges set status='completed', completed_at=now() where id=$1`, [id]
+      );
+
+      await client.query('commit');
+    });
+
+    res.json({ ok: true });
+  } catch (e:any) {
+    console.error(e);
+    res.status(400).json({ error: e.message || String(e) });
   }
 });
 

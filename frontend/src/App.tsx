@@ -6,6 +6,7 @@ import NewListing from './pages/NewListing';
 import ListingDetail from './pages/ListingDetail';
 import Dashboard from './pages/Dashboard';
 import Inbox from './pages/Inbox';
+import MySwaps from "./pages/MySwaps";
 
 
 export default function App(){
@@ -19,6 +20,7 @@ return (
 <Route path="/listing/:id" element={<ListingDetail/>} />
 <Route path="/dashboard" element={<Dashboard/>} />
 <Route path="/inbox" element={<Inbox/>} />
+<Route path="/swaps" element={<MySwaps />} />
 <Route path="*" element={<Navigate to="/"/>} />
 </Routes>
 );

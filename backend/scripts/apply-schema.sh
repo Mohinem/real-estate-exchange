@@ -17,3 +17,5 @@ DATABASE_URL="${1:-${DATABASE_URL:-}}"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/schema.sql
 [ -f db/rls.sql ] && psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/rls.sql || true
+[ -f db/swap_patch.sql ] && psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/swap_patch.sql || true
+
