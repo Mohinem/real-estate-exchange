@@ -21,24 +21,47 @@ app.post('/auth/login', async (req, res) => {
     const { email, password } = (req.body ?? {}) as { email?: string; password?: string };
     if (!email || !password) return res.status(400).json({ error: 'email and password required' });
 
-    const userRes = await pool.query<{id:number; password_hash:string; is_admin:boolean}>(
-      'select id, password_hash, is_admin from app_public.users where email = $1',
+    // include display_name (and email) in the select + types
+    const userRes = await pool.query<{
+      id: number;
+      password_hash: string;
+      is_admin: boolean;
+      display_name: string;
+      email: string;
+    }>(
+      'select id, password_hash, is_admin, display_name, email from app_public.users where email = $1',
       [email]
     );
     if (userRes.rowCount === 0) return res.status(401).json({ error: 'invalid credentials' });
 
     const u = userRes.rows[0];
-    const okRes = await pool.query<{ok:boolean}>('select app_private.check_password($1,$2) as ok',[u.password_hash,password]);
+    const okRes = await pool.query<{ ok: boolean }>(
+      'select app_private.check_password($1,$2) as ok',
+      [u.password_hash, password]
+    );
     if (!okRes.rows[0]?.ok) return res.status(401).json({ error: 'invalid credentials' });
 
-    const role = u.is_admin ? 'app_admin' : 'app_user' as const;
-    const token = signJwt({ user_id: u.id, role });
-    return res.json({ token, user: { id: u.id, email, role } });
+    const role = u.is_admin ? 'app_admin' : ('app_user' as const);
+
+    // include display_name + email in JWT so frontend can show name
+    const token = signJwt({
+      user_id: u.id,
+      role,
+      display_name: u.display_name,
+      email: u.email,
+    });
+
+    // also include it in the response body for immediate use if you want
+    return res.json({
+      token,
+      user: { id: u.id, email: u.email, display_name: u.display_name, role },
+    });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: 'server error' });
   }
 });
+
 
 // small helper to read auth from parsed JWT
 function authFromReq(req: any) {
