@@ -114,8 +114,16 @@ export default function ListingDetail() {
   }
 
   const priceStr = `${listing.currency || ""}${Number(listing.price).toLocaleString()}`;
+  const isReserved = !!listing.reserved_exchange_id;
+  const isSwapped = !listing.is_active || !!listing.exchanged_at;
+
+  // Only allow proposing if:
+  // - logged in
+  // - listing is active
+  // - listing is not yours
+  // - listing is not reserved
   const canProposeHere =
-    !!me && listing.is_active && Number(listing.owner_id) !== Number(me) && !listing.reserved_exchange_id;
+    !!me && listing.is_active && !isReserved && Number(listing.owner_id) !== Number(me);
 
   return (
     <Layout>
@@ -142,6 +150,18 @@ export default function ListingDetail() {
                 </button>
               )}
             </div>
+
+            {/* Status banners */}
+            {isSwapped && (
+              <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800">
+                This property has been <b>swapped</b> and is no longer available.
+              </div>
+            )}
+            {!isSwapped && isReserved && (
+              <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                This property is <b>reserved for an ongoing exchange</b>.
+              </div>
+            )}
 
             {listing.description && <p className="mt-4 text-gray-800">{listing.description}</p>}
 
@@ -170,10 +190,10 @@ export default function ListingDetail() {
               {suggestions.map((m: any) => {
                 const price = `${m.currency || ""}${Number(m.price).toLocaleString()}`;
 
-                // ✅ Enable when:
-                //   - you're logged in,
-                //   - the viewed listing isn't yours,
-                //   - and the suggested card IS yours (so you can offer it)
+                // Enable when:
+                // - you're logged in,
+                // - the viewed listing isn't yours,
+                // - and the suggested card IS yours (so you can offer it)
                 const canUseThisAsMyOffer =
                   !!me &&
                   Number(listing.owner_id) !== Number(me) &&
@@ -188,7 +208,6 @@ export default function ListingDetail() {
                     </div>
                     <div className="mt-3">
                       <button
-                        // We propose **to the viewed listing**, using this card as a hint for the user
                         disabled={!canUseThisAsMyOffer}
                         onClick={() => openSwapFor(listingId)}
                         className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-60"

@@ -112,7 +112,7 @@ app.get('/listings', async (req, res) => {
   const auth = authFromReq(req);
   try {
     const rows = await withRlsClient(auth, async (c) => {
-      const parts: string[] = ['is_active = true'];
+      const parts: string[] = ['is_active = true', 'reserved_exchange_id is null'];
       const vals: any[] = [];
       if (location) { vals.push(`%${location}%`); parts.push(`location ilike $${vals.length}`); }
       if (propertyType) { vals.push(propertyType); parts.push(`property_type = $${vals.length}::app_public.property_type`); }
