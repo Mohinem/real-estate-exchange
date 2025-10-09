@@ -451,3 +451,51 @@ create policy exchanges_select_participants on app_public.exchanges
     or
     b_user_id = current_setting('jwt.claims.user_id', true)::int
   );
+
+-- ===========================================================
+-- ✅ EXCHANGES TABLE PERMISSIONS AND RLS POLICIES
+-- ===========================================================
+
+-- Ensure schema access
+GRANT USAGE ON SCHEMA app_public TO app_user;
+
+-- Base privileges on the table
+GRANT SELECT, INSERT, UPDATE ON TABLE app_public.exchanges TO app_user;
+
+-- Sequence permissions (needed for serial/identity columns)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'exchanges_id_seq') THEN
+    GRANT USAGE, SELECT ON SEQUENCE app_public.exchanges_id_seq TO app_user;
+  END IF;
+END$$;
+
+-- Enable RLS (Row Level Security)
+ALTER TABLE app_public.exchanges ENABLE ROW LEVEL SECURITY;
+
+-- Allow participants to SELECT their own exchanges
+DROP POLICY IF EXISTS exchanges_participant_select ON app_public.exchanges;
+CREATE POLICY exchanges_participant_select
+  ON app_public.exchanges
+  FOR SELECT
+  USING (current_setting('jwt.claims.user_id', true)::int IN (a_user_id, b_user_id));
+
+-- Allow participants to INSERT their own exchanges
+DROP POLICY IF EXISTS exchanges_participant_insert ON app_public.exchanges;
+CREATE POLICY exchanges_participant_insert
+  ON app_public.exchanges
+  FOR INSERT
+  WITH CHECK (current_setting('jwt.claims.user_id', true)::int IN (a_user_id, b_user_id));
+
+-- Allow participants to UPDATE their own exchanges
+DROP POLICY IF EXISTS exchanges_participant_update ON app_public.exchanges;
+CREATE POLICY exchanges_participant_update
+  ON app_public.exchanges
+  FOR UPDATE
+  USING (current_setting('jwt.claims.user_id', true)::int IN (a_user_id, b_user_id))
+  WITH CHECK (current_setting('jwt.claims.user_id', true)::int IN (a_user_id, b_user_id));
+
+-- ===========================================================
+-- ✅ END EXCHANGES RLS CONFIGURATION
+-- ===========================================================
+

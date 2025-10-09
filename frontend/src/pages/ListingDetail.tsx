@@ -1,3 +1,4 @@
+// frontend/src/pages/ListingDetail.tsx
 import * as React from "react";
 import Layout from "../components/Layout";
 import { useParams } from "react-router-dom";
@@ -5,21 +6,32 @@ import SwapModal from "../components/SwapModal";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
-function getUserIdFromJwt(): number | null {
-  const jwt = localStorage.getItem("jwt");
-  if (!jwt) return null;
+// base64url-safe JWT payload decode -> returns object or null
+function decodeJwtPayload<T = any>(token: string): T | null {
   try {
-    const [, payload] = jwt.split(".");
-    const json = JSON.parse(atob(payload));
-    return Number(json.user_id) || null;
+    const base64Url = token.split(".")[1];
+    if (!base64Url) return null;
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+    const json = atob(padded);
+    return JSON.parse(json);
   } catch {
     return null;
   }
 }
 
+function getUserIdFromJwt(): number | null {
+  const jwt = localStorage.getItem("jwt");
+  if (!jwt) return null;
+  const payload = decodeJwtPayload<any>(jwt);
+  return payload?.user_id != null ? Number(payload.user_id) : null;
+}
+
 export default function ListingDetail() {
   const { id } = useParams();
   const listingId = Number(id);
+  const me = getUserIdFromJwt();
+
   const [listing, setListing] = React.useState<any | null>(null);
   const [images, setImages] = React.useState<any[]>([]);
   const [suggestions, setSuggestions] = React.useState<any[]>([]);
@@ -29,8 +41,6 @@ export default function ListingDetail() {
   // Swap modal state
   const [swapOpen, setSwapOpen] = React.useState(false);
   const [swapTargetId, setSwapTargetId] = React.useState<number | null>(null);
-
-  const me = getUserIdFromJwt();
 
   React.useEffect(() => {
     let alive = true;
@@ -47,15 +57,15 @@ export default function ListingDetail() {
         setListing(d1.listing);
         setImages(d1.images || []);
 
-        // 2) Suggestions
+        // 2) Suggestions (best-effort)
         const r2 = await fetch(`${API_URL}/listings/${listingId}/suggest?pct=15`);
-        if (!r2.ok) {
-          // suggestions are best-effort; don't fail the page
-          setSuggestions([]);
-        } else {
-          const d2 = await r2.json(); // { items: [...] }
-          if (!alive) return;
-          setSuggestions(d2.items || []);
+        if (alive) {
+          if (r2.ok) {
+            const d2 = await r2.json(); // { items: [...] }
+            setSuggestions(d2.items || []);
+          } else {
+            setSuggestions([]);
+          }
         }
       } catch (e: any) {
         if (alive) setErr(e.message || String(e));
@@ -68,6 +78,15 @@ export default function ListingDetail() {
     };
   }, [listingId]);
 
+  function openSwapFor(targetId: number) {
+    if (!localStorage.getItem("jwt")) {
+      alert("Please login first to propose a swap.");
+      return;
+    }
+    setSwapTargetId(targetId);
+    setSwapOpen(true);
+  }
+
   if (loading) {
     return (
       <Layout>
@@ -79,7 +98,9 @@ export default function ListingDetail() {
     return (
       <Layout>
         <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {err}
+          </div>
         </section>
       </Layout>
     );
@@ -96,14 +117,10 @@ export default function ListingDetail() {
   const canProposeHere =
     !!me && listing.is_active && Number(listing.owner_id) !== Number(me) && !listing.reserved_exchange_id;
 
-  function openSwapFor(targetId: number) {
-    setSwapTargetId(targetId);
-    setSwapOpen(true);
-  }
-
   return (
     <Layout>
       <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+        {/* Listing header card */}
         <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
           <div className="h-40 bg-gradient-to-br from-brand-100 to-white" />
           <div className="p-6">
@@ -115,6 +132,7 @@ export default function ListingDetail() {
                 </div>
                 <div className="mt-2 text-lg font-medium">{priceStr}</div>
               </div>
+
               {canProposeHere && (
                 <button
                   onClick={() => openSwapFor(listingId)}
@@ -151,8 +169,16 @@ export default function ListingDetail() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {suggestions.map((m: any) => {
                 const price = `${m.currency || ""}${Number(m.price).toLocaleString()}`;
-                const canProposeToSuggestion =
-                  !!me && m.is_active && Number(m.owner_id) !== Number(me) && !m.reserved_exchange_id;
+
+                // ✅ Enable when:
+                //   - you're logged in,
+                //   - the viewed listing isn't yours,
+                //   - and the suggested card IS yours (so you can offer it)
+                const canUseThisAsMyOffer =
+                  !!me &&
+                  Number(listing.owner_id) !== Number(me) &&
+                  Number(m.owner_id) === Number(me);
+
                 return (
                   <div key={m.id} className="rounded-xl border bg-white p-4 shadow-sm">
                     <div className="text-sm text-gray-500">#{m.id}</div>
@@ -162,9 +188,15 @@ export default function ListingDetail() {
                     </div>
                     <div className="mt-3">
                       <button
-                        disabled={!canProposeToSuggestion}
-                        onClick={() => openSwapFor(m.id)}
+                        // We propose **to the viewed listing**, using this card as a hint for the user
+                        disabled={!canUseThisAsMyOffer}
+                        onClick={() => openSwapFor(listingId)}
                         className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-60"
+                        title={
+                          canUseThisAsMyOffer
+                            ? "Propose a swap to this listing using your selected offer"
+                            : "You can only use your own listing to propose, and only if the viewed listing isn’t yours"
+                        }
                       >
                         Propose Swap
                       </button>
@@ -177,14 +209,14 @@ export default function ListingDetail() {
         </div>
       </section>
 
-      {/* Swap modal (targets either the viewed listing or a suggestion) */}
+      {/* Swap modal (targets the viewed listing; you pick your offer inside) */}
       {swapTargetId != null && (
         <SwapModal
           toListingId={swapTargetId}
           open={swapOpen}
           onClose={() => setSwapOpen(false)}
           onSuccess={() => {
-            // optional: toast or refresh suggestions/listing
+            // optional: refresh, toast, etc.
           }}
         />
       )}

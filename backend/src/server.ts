@@ -342,24 +342,31 @@ app.post('/exchange-requests', async (req, res) => {
   if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
 
   try {
-    const { fromListingId, toListingId, message, cashAdjustment = 0, currency = 'INR', expiresAt = null } = req.body ?? {};
+    const { fromListingId, toListingId, cashAdjustment = 0, currency = 'INR', message } = req.body ?? {};
+    if (!fromListingId || !toListingId) return res.status(400).json({ error: 'fromListingId and toListingId required' });
 
+    // the current user must own the fromListingId
     await assertOwner(Number(fromListingId), Number(auth.user_id));
-    await ensureActiveUnreserved(Number(fromListingId));
-    await ensureActiveUnreserved(Number(toListingId));
 
-    const toOwner = await pool.query('select owner_id from app_public.listings where id=$1', [toListingId]);
-    if (!toOwner.rowCount) return res.status(404).json({ error: 'target not found' });
-    const toUserId = Number(toOwner.rows[0].owner_id);
-    if (toUserId === Number(auth.user_id)) return res.status(400).json({ error: 'cannot propose to yourself' });
-
-    const row = await withRlsClient(auth, async (c) => {
+    const row = await withRlsClient(auth, async c => {
       const r = await c.query(
-        `insert into app_public.exchange_requests
-          (from_listing_id,to_listing_id,from_user_id,to_user_id,message,currency,cash_adjustment,expires_at,status)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,'pending')
-         returning *`,
-        [fromListingId, toListingId, auth.user_id, toUserId, message ?? null, String(currency).toUpperCase(), Number(cashAdjustment), expiresAt]
+        `
+        insert into app_public.exchange_requests
+          (from_listing_id, to_listing_id, message, cash_adjustment, currency, from_user_id, to_user_id)
+        values (
+          $1, $2, $3, $4, $5,
+          (select owner_id from app_public.listings where id = $1),
+          (select owner_id from app_public.listings where id = $2)
+        )
+        returning *
+        `,
+        [
+          Number(fromListingId),
+          Number(toListingId),
+          message ?? null,
+          Number(cashAdjustment) || 0,
+          String(currency || 'INR'),
+        ]
       );
       return r.rows[0];
     });
@@ -371,69 +378,144 @@ app.post('/exchange-requests', async (req, res) => {
   }
 });
 
-// ACCEPT (only recipient; row-locked; creates exchange + reserves both listings)
-app.post('/exchange-requests/:id/accept', async (req, res) => {
+// ACCEPT (only recipient; creates an exchanges row and reserves listings) — robust + diagnostics + rollback
+app.post("/exchange-requests/:id/accept", async (req, res) => {
   const auth = authFromReq(req);
-  if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
+  console.log("🔹 [ACCEPT] start", { user: auth, params: req.params });
+
+  if (auth.role === "anonymous") {
+    console.log("⛔ [ACCEPT] anonymous");
+    return res.status(401).json({ error: "auth required" });
+  }
 
   const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid id" });
 
   try {
-    const exch = await withRlsClient(auth, async (client) => {
-      await client.query('begin');
+    const result = await withRlsClient(auth, async (c) => {
+      await c.query("begin");
+      console.log("🔸 [ACCEPT] tx begun for id", id);
 
-      // lock the request row
-      const rq = await client.query('select * from app_public.exchange_requests where id=$1 for update', [id]);
-      if (!rq.rowCount) throw new Error('not found');
-      const r = rq.rows[0];
+      try {
+        // 1) Fetch ER visible to this user; compute owners via scalar subqueries
+        const erQ = await c.query(
+          `
+          select
+            er.id,
+            er.status,
+            er.from_listing_id,
+            er.to_listing_id,
+            coalesce(er.currency, 'INR')    as currency,
+            coalesce(er.cash_adjustment, 0) as cash_adjustment,
+            (select owner_id from app_public.listings where id = er.from_listing_id) as from_owner_id,
+            (select owner_id from app_public.listings where id = er.to_listing_id)   as to_owner_id
+          from app_public.exchange_requests er
+          where er.id = $1
+          for update
+          `,
+          [id]
+        );
 
-      if (r.status !== 'pending') throw new Error('not pending');
-      if (Number(r.to_user_id) !== Number(auth.user_id)) throw new Error('not your request to accept');
-      if (r.expires_at && new Date(r.expires_at) < new Date()) throw new Error('request expired');
+        console.log("🔸 [ACCEPT] fetched", {
+          rowCount: erQ.rowCount,
+          row: erQ.rows[0],
+        });
 
-      // lock both listings
-      const A = await client.query('select * from app_public.listings where id=$1 for update', [r.from_listing_id]);
-      const B = await client.query('select * from app_public.listings where id=$1 for update', [r.to_listing_id]);
-      if (!A.rowCount || !B.rowCount) throw new Error('listing not found');
-      const a = A.rows[0], b = B.rows[0];
-      if (!a.is_active || a.reserved_exchange_id) throw new Error('counterparty listing unavailable');
-      if (!b.is_active || b.reserved_exchange_id) throw new Error('your listing unavailable');
+        if (!erQ.rowCount) {
+          console.log("⚠️  [ACCEPT] no row visible to user (RLS) or wrong id");
+          await c.query("rollback");
+          return { ok: false, code: 404, reason: "not visible / not found" };
+        }
 
-      // create the exchange (RLS: insert allowed because you're a participant)
-      const er = await client.query(
-        `insert into app_public.exchanges
-          (listing_a_id, listing_b_id, a_user_id, b_user_id, currency, cash_adjustment_a_to_b, status)
-         values ($1,$2,$3,$4,$5,$6,'active')
-         returning *`,
-        [a.id, b.id, a.owner_id, b.owner_id, r.currency, r.cash_adjustment]
-      );
-      const exchange = er.rows[0];
+        const er = erQ.rows[0];
+        const me = Number(auth.user_id);
+        const toOwner = Number(er.to_owner_id);
+        console.log("🔸 [ACCEPT] ownership check", { me, toOwner });
 
-      // reserve both listings (RLS: allowed by listings_update_participants)
-      await client.query(
-        `update app_public.listings
-           set reserved_exchange_id=$1
-         where id in ($2,$3)`,
-        [exchange.id, a.id, b.id]
-      );
+        if (me !== toOwner) {
+          console.log("⛔ [ACCEPT] user is not the recipient owner");
+          await c.query("rollback");
+          return { ok: false, code: 403, reason: "not recipient owner" };
+        }
 
-      // mark request accepted
-      await client.query(
-        `update app_public.exchange_requests set status='accepted', updated_at=now() where id=$1`,
-        [id]
-      );
+        if (er.status !== "pending") {
+          console.log("⛔ [ACCEPT] status not pending", { status: er.status });
+          await c.query("rollback");
+          return { ok: false, code: 409, reason: "not pending" };
+        }
 
-      await client.query('commit');
-      return exchange;
+        // 2) Mark ER accepted
+        await c.query(
+          `update app_public.exchange_requests
+             set status='accepted', updated_at=now()
+           where id=$1`,
+          [id]
+        );
+        console.log("✅ [ACCEPT] ER marked accepted");
+
+        // 3) Create exchange row
+        const exIns = await c.query(
+          `
+          insert into app_public.exchanges
+            (listing_a_id, listing_b_id,
+             a_user_id,    b_user_id,
+             currency, cash_adjustment_a_to_b,
+             status,  created_at)
+          values ($1,$2,$3,$4,$5,$6,'active', now())
+          returning id
+          `,
+          [
+            Number(er.from_listing_id),
+            Number(er.to_listing_id),
+            Number(er.from_owner_id),
+            Number(er.to_owner_id),
+            er.currency,
+            Number(er.cash_adjustment) || 0,
+          ]
+        );
+        const exchangeId = exIns.rows[0].id;
+        console.log("✅ [ACCEPT] exchange created", { exchangeId });
+
+        // 4) Reserve both listings with exchangeId FK
+        console.log("🔸 [ACCEPT] reserving listings", {
+          exchangeId,
+          from: er.from_listing_id,
+          to: er.to_listing_id,
+        });
+
+        await c.query(
+          `
+          update app_public.listings
+             set reserved_exchange_id = $1
+           where id in ($2,$3)
+          `,
+          [exchangeId, Number(er.from_listing_id), Number(er.to_listing_id)]
+        );
+
+        console.log("✅ [ACCEPT] listings reserved");
+        await c.query("commit");
+        console.log("✅ [ACCEPT] commit");
+        return { ok: true, exchangeId };
+      } catch (inner) {
+        console.error("🔥 [ACCEPT] inner error — rolling back:", (inner as any)?.message);
+        await c.query("rollback");
+        throw inner; // let outer catch map it to HTTP
+      }
     });
 
-    res.json(exch);
-  } catch (e:any) {
-    // if withRlsClient throws, it already rolled back
-    console.error(e);
-    res.status(400).json({ error: e.message || String(e) });
+    if (!result.ok) {
+      console.warn("⚠️  [ACCEPT] failure", result);
+      const code = result.code === 403 ? 403 : result.code === 409 ? 409 : 404;
+      return res.status(code).json({ error: result.reason || "not found or not allowed" });
+    }
+
+    res.json({ ok: true, exchangeId: result.exchangeId });
+  } catch (e: any) {
+    console.error("🔥 [ACCEPT] exception:", e.message, e.stack);
+    return res.status(400).json({ error: e.message || String(e) });
   }
 });
+
 
 app.post('/exchanges/:id/complete', async (req, res) => {
   const auth = authFromReq(req);
@@ -475,86 +557,162 @@ app.post('/exchanges/:id/complete', async (req, res) => {
 });
 
 // DECLINE (only recipient, while pending)
-app.post('/exchange-requests/:id/decline', async (req, res) => {
+app.post("/exchange-requests/:id/decline", async (req, res) => {
   const auth = authFromReq(req);
-  if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
+  if (auth.role === "anonymous") return res.status(401).json({ error: "auth required" });
+  const id = Number(req.params.id);
 
-  const { rowCount } = await pool.query(
-    `update app_public.exchange_requests
-     set status='rejected', updated_at=now()
-     where id=$1 and to_user_id=$2 and status='pending'`,
-    [Number(req.params.id), Number(auth.user_id)]
-  );
-  if (!rowCount) return res.status(400).json({ error: 'cannot decline' });
-  res.json({ ok: true });
+  try {
+    const ok = await withRlsClient(auth, async (c) => {
+      const r = await c.query(
+        `
+        select er.id
+        from app_public.exchange_requests er
+        join app_public.listings l_to on l_to.id = er.to_listing_id
+        where er.id = $1
+          and l_to.owner_id = current_setting('jwt.claims.user_id')::int
+        `,
+        [id]
+      );
+      if (!r.rowCount) return false;
+
+      await c.query(
+        `update app_public.exchange_requests set status='rejected', updated_at=now() where id=$1`,
+        [id]
+      );
+      return true;
+    });
+
+    if (!ok) return res.status(404).json({ error: "listing not found or not allowed" });
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error(e);
+    res.status(400).json({ error: e.message || String(e) });
+  }
 });
 
 // CANCEL (only sender, while pending)
-app.post('/exchange-requests/:id/cancel', async (req, res) => {
+app.post("/exchange-requests/:id/cancel", async (req, res) => {
   const auth = authFromReq(req);
-  if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
+  if (auth.role === "anonymous") return res.status(401).json({ error: "auth required" });
 
-  const { rowCount } = await pool.query(
-    `update app_public.exchange_requests
-     set status='cancelled', updated_at=now()
-     where id=$1 and from_user_id=$2 and status='pending'`,
-    [Number(req.params.id), Number(auth.user_id)]
-  );
-  if (!rowCount) return res.status(400).json({ error: 'cannot cancel' });
-  res.json({ ok: true });
-});
-
-// COUNTER (recipient proposes new cashAdjustment/message -> creates a new pending child request)
-app.post('/exchange-requests/:id/counter', async (req, res) => {
-  const auth = authFromReq(req);
-  if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
   const id = Number(req.params.id);
-  const { cashAdjustment = 0, message } = req.body ?? {};
+  if (!id) return res.status(400).json({ error: "invalid id" });
 
-  const client = await pool.connect();
   try {
-    await client.query('begin');
-    const base = await client.query('select * from app_public.exchange_requests where id=$1 for update', [id]);
-    if (!base.rowCount) throw new Error('not found');
-    const r = base.rows[0];
-    if (r.status !== 'pending') throw new Error('cannot counter now');
-    if (Number(r.to_user_id) !== Number(auth.user_id)) throw new Error('only recipient can counter');
+    const ok = await withRlsClient(auth, async (c) => {
+      // Only the SENDER (owner of from_listing_id) can cancel, and only while 'pending'
+      const r = await c.query(
+        `
+        update app_public.exchange_requests er
+        set status = 'cancelled', updated_at = now()
+        where er.id = $1
+          and er.status = 'pending'
+          and exists (
+            select 1
+            from app_public.listings l
+            where l.id = er.from_listing_id
+              and l.owner_id = current_setting('jwt.claims.user_id', true)::int
+          )
+        `,
+        [id]
+      );
 
-    // mark current as accepted->countered-like (reuse 'accepted' is wrong; use 'pending'->'rejected' or leave pending)
-    await client.query(`update app_public.exchange_requests set status='rejected', updated_at=now() where id=$1`, [id]);
+      // rowCount is number | null — coalesce to 0
+      const affected = Number(r?.rowCount ?? 0);
+      return affected > 0;
+    });
 
-    const ins = await client.query(
-      `insert into app_public.exchange_requests
-        (from_listing_id,to_listing_id,from_user_id,to_user_id,message,currency,cash_adjustment,expires_at,parent_request_id,status)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending') returning *`,
-      [r.to_listing_id, r.from_listing_id, r.to_user_id, r.from_user_id, message ?? null, r.currency, Number(cashAdjustment), r.expires_at, id]
-    );
-    await client.query('commit');
-    res.json(ins.rows[0]);
-  } catch (e:any) {
-    await client.query('rollback');
+    if (!ok) return res.status(404).json({ error: "not found or not allowed" });
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error(e);
     res.status(400).json({ error: e.message || String(e) });
-  } finally {
-    client.release();
   }
 });
+
+// COUNTER (recipient proposes new cashAdjustment/message)
+app.post("/exchange-requests/:id/counter", async (req, res) => {
+  const auth = authFromReq(req);
+  if (auth.role === "anonymous") return res.status(401).json({ error: "auth required" });
+
+  const id = Number(req.params.id);
+  const { cashAdjustment, message } = req.body || {};
+
+  try {
+    const result = await withRlsClient(auth, async (c) => {
+      // Get original + make sure current user owns the 'to' listing (recipient)
+      const r = await c.query(
+        `
+        select er.*
+        from app_public.exchange_requests er
+        join app_public.listings l_to on l_to.id = er.to_listing_id
+        where er.id = $1
+          and l_to.owner_id = current_setting('jwt.claims.user_id')::int
+        `,
+        [id]
+      );
+      if (!r.rowCount) return null;
+      const orig = r.rows[0];
+
+      // Mark original as rejected (history)
+      await c.query(`update app_public.exchange_requests set status='rejected', updated_at=now() where id=$1`, [id]);
+
+      // Create the counter: swap from/to + set user columns
+      const ins = await c.query(
+        `
+        insert into app_public.exchange_requests
+          (from_listing_id, to_listing_id, from_user_id, to_user_id,
+           cash_adjustment, currency, message, status, created_at, updated_at)
+        values (
+          $1, $2,
+          (select owner_id from app_public.listings where id = $1),
+          (select owner_id from app_public.listings where id = $2),
+          $3, coalesce($4,'INR'), $5, 'pending', now(), now()
+        )
+        returning *
+        `,
+        [
+          orig.to_listing_id,          // now proposing from the recipient's listing
+          orig.from_listing_id,        // targeting the original sender's listing
+          Number(cashAdjustment) || 0,
+          orig.currency || 'INR',
+          message || null,
+        ]
+      );
+
+      return ins.rows[0];
+    });
+
+    if (!result) return res.status(404).json({ error: "not allowed or not found" });
+    res.json({ ok: true, counter: result });
+  } catch (e: any) {
+    console.error(e);
+    res.status(400).json({ error: e.message || String(e) });
+  }
+});
+
 
 // List my requests
 app.get('/exchange-requests/mine', async (req, res) => {
   const auth = authFromReq(req);
   if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
+  const role = String((req.query.role ?? 'received')).toLowerCase(); // 'received' | 'sent'
+  if (role !== 'received' && role !== 'sent') return res.status(400).json({ error: 'role must be received|sent' });
 
-  const role = String(req.query.role || 'received'); // 'sent' | 'received'
-  const status = req.query.status ? String(req.query.status) : null;
-  const col = role === 'sent' ? 'from_user_id' : 'to_user_id';
-
-  const vals:any[] = [auth.user_id];
-  let sql = `select * from app_public.exchange_requests where ${col}=$1`;
-  if (status) { vals.push(status); sql += ` and status=$2`; }
-  sql += ` order by created_at desc limit 100`;
-
-  const { rows } = await pool.query(sql, vals);
-  res.json({ items: rows });
+  try {
+    const rows = await withRlsClient(auth, async c => {
+      const sql = role === 'received'
+        ? `select * from app_public.exchange_requests
+             where to_user_id = current_setting('jwt.claims.user_id',true)::int
+             order by created_at desc limit 100`
+        : `select * from app_public.exchange_requests
+             where from_user_id = current_setting('jwt.claims.user_id',true)::int
+             order by created_at desc limit 100`;
+      return (await c.query(sql)).rows;
+    });
+    res.json({ items: rows });
+  } catch (e:any) { console.error(e); res.status(500).json({ error: 'server error' }); }
 });
 
 // COMPLETE (either participant; closes both listings)

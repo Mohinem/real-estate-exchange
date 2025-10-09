@@ -3,125 +3,106 @@ const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 function authHeaders() {
   const jwt = localStorage.getItem("jwt");
-  return jwt ? { Authorization: `Bearer ${jwt}` } : {};
+  return {
+    "content-type": "application/json",
+    ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+  };
 }
 
-async function asJson<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    // try to surface server error message
-    const body = await res.json().catch(async () => ({ error: await res.text().catch(() => "") }));
-    throw new Error(body.error || `HTTP ${res.status}`);
+async function getJsonWithFallback(urls: string[]) {
+  const headers = authHeaders();
+
+  let lastErr = "";
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { headers, credentials: "include" });
+      if (res.ok) {
+        const ct = res.headers.get("content-type") || "";
+        if (ct.includes("application/json")) return res.json();
+        // If backend returned HTML for some reason, try next candidate
+        lastErr = "Server returned non-JSON response.";
+        continue;
+      }
+      // For 404 try next, for others surface the body
+      if (res.status !== 404) {
+        lastErr = (await res.text().catch(() => "")) || `HTTP ${res.status}`;
+        break;
+      }
+    } catch (e: any) {
+      lastErr = e?.message || String(e);
+    }
   }
-  return res.json();
+  throw new Error(lastErr || "Endpoint not found");
 }
 
-/** -------- Listings (mine) -------- */
-export async function getMyListings() {
-  const res = await fetch(`${API_URL}/api/listings/mine`, {
+// ---- Public API -------------------------------------------------------------
+
+// List my swap requests
+export async function listMySwapRequests({ role }: { role: "received" | "sent" }) {
+  const qs = `role=${encodeURIComponent(role)}`;
+  const res = await fetch(`${API_URL}/exchange-requests/mine?${qs}`, {
+    headers: authHeaders(),
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
   });
-  return asJson<any[]>(res);
+  if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
+  return res.json(); // { items: [...] }
 }
 
-/** -------- Exchange Requests types & helpers -------- */
-export type ExchangeRequest = {
-  id: number;
-  from_listing_id: number;
-  to_listing_id: number;
-  from_user_id?: number;
-  to_user_id?: number;
-  message?: string | null;
-  currency?: string;
-  cash_adjustment?: number;
-  status: "pending" | "accepted" | "rejected" | "cancelled";
-  created_at: string;
-  updated_at: string;
-  parent_request_id?: number | null;
-  expires_at?: string | null;
-};
-
-/** Create a new swap proposal */
-export async function proposeSwap(body: {
+// Create new proposal
+export async function createRequest(payload: {
   fromListingId: number;
   toListingId: number;
   cashAdjustment?: number;
-  currency?: string;
   message?: string;
-  expiresAt?: string | null;
 }) {
   const res = await fetch(`${API_URL}/exchange-requests`, {
     method: "POST",
+    headers: authHeaders(),
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
-  return asJson<ExchangeRequest>(res);
+  if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
+  return res.json();
 }
 
-/** List my swap requests by role (received|sent) and optional status */
-export async function listMySwapRequests(options: {
-  role?: "sent" | "received";
-  status?: "pending" | "accepted" | "rejected" | "cancelled";
-} = {}) {
-  const params = new URLSearchParams();
-  if (options.role) params.set("role", options.role);
-  if (options.status) params.set("status", options.status);
-  const res = await fetch(`${API_URL}/exchange-requests/mine?${params.toString()}`, {
-    credentials: "include",
-    headers: { ...authHeaders() },
-  });
-  return asJson<{ items: ExchangeRequest[] }>(res);
-}
-
-/** Accept a received request (creates an exchange & reserves both listings) */
+// Actions
 export async function acceptRequest(id: number) {
   const res = await fetch(`${API_URL}/exchange-requests/${id}/accept`, {
     method: "POST",
+    headers: authHeaders(),
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
   });
-  // server returns the created exchange; we don't type it strictly here
-  return asJson<any>(res);
+  if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
+  return res.json();
 }
 
-/** Decline a received request */
 export async function declineRequest(id: number) {
   const res = await fetch(`${API_URL}/exchange-requests/${id}/decline`, {
     method: "POST",
+    headers: authHeaders(),
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
   });
-  return asJson<{ ok: true }>(res);
+  if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
+  return res.json();
 }
 
-/** Cancel a sent request */
 export async function cancelRequest(id: number) {
   const res = await fetch(`${API_URL}/exchange-requests/${id}/cancel`, {
     method: "POST",
+    headers: authHeaders(),
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
   });
-  return asJson<{ ok: true }>(res);
+  if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
+  return res.json();
 }
 
-/** Counter a received request (creates a new pending request reversing roles) */
 export async function counterRequest(id: number, body: { cashAdjustment?: number; message?: string }) {
   const res = await fetch(`${API_URL}/exchange-requests/${id}/counter`, {
     method: "POST",
+    headers: authHeaders(),
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
   });
-  return asJson<ExchangeRequest>(res);
-}
-
-/** Mark an active exchange as completed */
-export async function completeExchange(exchangeId: number) {
-  const res = await fetch(`${API_URL}/exchanges/${exchangeId}/complete`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-  });
-  return asJson<{ ok: true }>(res);
+  if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
+  return res.json();
 }

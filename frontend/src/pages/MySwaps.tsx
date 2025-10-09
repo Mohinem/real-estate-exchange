@@ -1,7 +1,13 @@
 // frontend/src/pages/MySwaps.tsx
 import * as React from "react";
 import Layout from "../components/Layout";
-import { listMySwapRequests, acceptRequest, declineRequest, cancelRequest, counterRequest } from "../lib/exchanges";
+import {
+  listMySwapRequests,
+  acceptRequest,
+  declineRequest,
+  cancelRequest,
+  counterRequest,
+} from "../lib/exchanges";
 
 type Tab = "received" | "sent";
 
@@ -11,11 +17,12 @@ export default function MySwaps() {
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
 
+  // --- Helper: Load swaps for given role ---
   async function load(role: Tab) {
     setLoading(true);
     setErr(null);
     try {
-      const { items } = await listMySwapRequests({ role }); // ✅ correct signature
+      const { items } = await listMySwapRequests({ role });
       setItems(items || []);
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -25,7 +32,6 @@ export default function MySwaps() {
   }
 
   React.useEffect(() => {
-    // must be logged in to see swaps
     const jwt = localStorage.getItem("jwt");
     if (!jwt) {
       setErr("Please login to view your swaps.");
@@ -36,9 +42,12 @@ export default function MySwaps() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  // --- Actions ---
   async function onAccept(id: number) {
+    if (!confirm("Accept this swap proposal?")) return;
     try {
       await acceptRequest(id);
+      alert("✅ Swap accepted!");
       await load(tab);
     } catch (e: any) {
       alert(e.message || "Failed to accept");
@@ -46,8 +55,10 @@ export default function MySwaps() {
   }
 
   async function onDecline(id: number) {
+    if (!confirm("Decline this swap proposal?")) return;
     try {
       await declineRequest(id);
+      alert("❌ Swap declined.");
       await load(tab);
     } catch (e: any) {
       alert(e.message || "Failed to decline");
@@ -55,8 +66,10 @@ export default function MySwaps() {
   }
 
   async function onCancel(id: number) {
+    if (!confirm("Cancel this swap request?")) return;
     try {
       await cancelRequest(id);
+      alert("🚫 Swap request canceled.");
       await load(tab);
     } catch (e: any) {
       alert(e.message || "Failed to cancel");
@@ -70,15 +83,16 @@ export default function MySwaps() {
     try {
       await counterRequest(id, {
         cashAdjustment: Number(cash) || 0,
-        message: msg || undefined,
+        message: msg?.trim() || undefined,
       });
-      // After a counter, switch to "Sent" (your counter is now your outgoing request)
-      setTab("sent");
+      alert("🔁 Counter-offer sent!");
+      setTab("sent"); // switch to sent after countering
     } catch (e: any) {
       alert(e.message || "Failed to counter");
     }
   }
 
+  // --- Render ---
   return (
     <Layout>
       <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
@@ -88,7 +102,9 @@ export default function MySwaps() {
             <button
               onClick={() => setTab("received")}
               className={`px-3 py-1.5 rounded-md border text-sm ${
-                tab === "received" ? "bg-blue-50 border-blue-400 text-blue-700" : "hover:bg-gray-50"
+                tab === "received"
+                  ? "bg-blue-50 border-blue-400 text-blue-700"
+                  : "hover:bg-gray-50"
               }`}
             >
               Received
@@ -96,7 +112,9 @@ export default function MySwaps() {
             <button
               onClick={() => setTab("sent")}
               className={`px-3 py-1.5 rounded-md border text-sm ${
-                tab === "sent" ? "bg-blue-50 border-blue-400 text-blue-700" : "hover:bg-gray-50"
+                tab === "sent"
+                  ? "bg-blue-50 border-blue-400 text-blue-700"
+                  : "hover:bg-gray-50"
               }`}
             >
               Sent
@@ -116,65 +134,94 @@ export default function MySwaps() {
           )}
 
           <div className="mt-4 grid gap-4">
-            {items.map((r: any) => (
-              <div key={r.id} className="rounded-lg border bg-white p-4 shadow-sm">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div>
-                    <div className="font-medium">
-                      From listing #{r.from_listing_id} → To listing #{r.to_listing_id}
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      Status: <span className="font-medium">{r.status}</span>
-                      {r.cash_adjustment ? (
-                        <span className="ml-2">
-                          • Cash: {r.currency || "INR"}
-                          {Number(r.cash_adjustment).toLocaleString()}
+            {items.map((r: any) => {
+              const isPending = r.status === "pending";
+              return (
+                <div
+                  key={r.id}
+                  className="rounded-lg border bg-white p-4 shadow-sm transition hover:shadow-md"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <div className="font-medium">
+                        From listing #{r.from_listing_id} → To listing #{r.to_listing_id}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        Status:{" "}
+                        <span
+                          className={`font-medium ${
+                            r.status === "accepted"
+                              ? "text-green-600"
+                              : r.status === "declined"
+                              ? "text-red-600"
+                              : "text-gray-800"
+                          }`}
+                        >
+                          {r.status}
                         </span>
-                      ) : null}
-                      {r.message ? <span className="ml-2 text-gray-500">“{r.message}”</span> : null}
+                        {r.cash_adjustment ? (
+                          <span className="ml-2">
+                            • Cash: {r.currency || "INR"}
+                            {Number(r.cash_adjustment).toLocaleString()}
+                          </span>
+                        ) : null}
+                        {r.message ? (
+                          <span className="ml-2 text-gray-500">“{r.message}”</span>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="flex gap-2">
-                    {tab === "received" ? (
-                      <>
-                        <button
-                          onClick={() => onAccept(r.id)}
-                          className="rounded-md bg-[--color-brand-500] px-3 py-1.5 text-sm text-white"
-                          disabled={r.status !== "pending"}
-                        >
-                          Accept
-                        </button>
-                        <button
-                          onClick={() => onCounter(r.id)}
-                          className="rounded-md border px-3 py-1.5 text-sm"
-                          disabled={r.status !== "pending"}
-                        >
-                          Counter
-                        </button>
-                        <button
-                          onClick={() => onDecline(r.id)}
-                          className="rounded-md border px-3 py-1.5 text-sm"
-                          disabled={r.status !== "pending"}
-                        >
-                          Decline
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => onCancel(r.id)}
-                          className="rounded-md border px-3 py-1.5 text-sm"
-                          disabled={r.status !== "pending"}
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    )}
+                    <div className="flex gap-2 flex-wrap justify-end">
+                      {tab === "received" ? (
+                        <>
+                          <button
+                            onClick={() => onAccept(r.id)}
+                            disabled={!isPending}
+                            className={`rounded-md px-3 py-1.5 text-sm text-white ${
+                              isPending
+                                ? "bg-green-600 hover:bg-green-700"
+                                : "bg-gray-300 cursor-not-allowed"
+                            }`}
+                          >
+                            Accept
+                          </button>
+                          <button
+                            onClick={() => onCounter(r.id)}
+                            disabled={!isPending}
+                            className={`rounded-md border px-3 py-1.5 text-sm ${
+                              isPending ? "hover:bg-gray-50" : "opacity-60"
+                            }`}
+                          >
+                            Counter
+                          </button>
+                          <button
+                            onClick={() => onDecline(r.id)}
+                            disabled={!isPending}
+                            className={`rounded-md border px-3 py-1.5 text-sm ${
+                              isPending ? "hover:bg-gray-50" : "opacity-60"
+                            }`}
+                          >
+                            Decline
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => onCancel(r.id)}
+                            disabled={!isPending}
+                            className={`rounded-md border px-3 py-1.5 text-sm ${
+                              isPending ? "hover:bg-gray-50" : "opacity-60"
+                            }`}
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>

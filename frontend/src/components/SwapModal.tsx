@@ -68,6 +68,15 @@ export default function SwapModal({ toListingId, open, onClose, onSuccess }: Pro
   const [message, setMessage] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
 
+  // Close on Escape
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  // Load listings when modal opens
   React.useEffect(() => {
     if (!open) return;
     let alive = true;
@@ -75,9 +84,7 @@ export default function SwapModal({ toListingId, open, onClose, onSuccess }: Pro
       try {
         setError(null);
         const mine = await fetchMyListings();
-        const active = (mine || []).filter(
-          (l) => l.is_active && !l.reserved_exchange_id
-        );
+        const active = (mine || []).filter((l) => l.is_active && !l.reserved_exchange_id);
         if (!alive) return;
         setMyListings(active);
         setFromListingId(active.length ? active[0].id : "");
@@ -105,6 +112,7 @@ export default function SwapModal({ toListingId, open, onClose, onSuccess }: Pro
       });
       onSuccess?.(res);
       onClose();
+      alert("Swap proposal sent ✅");
     } catch (e: any) {
       setError(e.message || "Failed to propose swap");
     } finally {
@@ -150,6 +158,9 @@ export default function SwapModal({ toListingId, open, onClose, onSuccess }: Pro
             onChange={(e) => setCashAdjustment(Number(e.target.value))}
             placeholder="0"
           />
+          <p className="mb-3 text-xs text-gray-500">
+            Positive = you pay them; negative = they pay you.
+          </p>
 
           <label className="block text-sm font-medium mb-1">Message (optional)</label>
           <textarea
@@ -160,14 +171,17 @@ export default function SwapModal({ toListingId, open, onClose, onSuccess }: Pro
             placeholder="Share any terms, constraints, timelines..."
           />
 
-          <div className="flex items-center justify-end gap-2">
+          {/* Actions */}
+          <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
             <button type="button" onClick={onClose} className="rounded-md border px-3 py-2 text-sm">
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading || !fromListingId}
-              className="rounded-md bg-[--color-brand-500] px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+              // Use a safe fallback so the button is visible even if the CSS variable isn't applied.
+              className="rounded-md px-3 py-2 text-sm font-medium text-white disabled:opacity-60 border
+                         bg-[color:var(--color-brand-500,#2563eb)]"
             >
               {loading ? "Sending…" : "Send Proposal"}
             </button>
