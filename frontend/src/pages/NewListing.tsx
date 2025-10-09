@@ -32,8 +32,9 @@ export default function NewListing() {
   const [previews, setPreviews] = React.useState<string[]>([]);
   const [submitting, setSubmitting] = React.useState(false);
   const [err, setErr] = React.useState<string | undefined>();
+  const [okMsg, setOkMsg] = React.useState<string | undefined>();
 
-  // generate & clean up previews
+  // previews
   React.useEffect(() => {
     const urls = images.map((f) => URL.createObjectURL(f));
     setPreviews(urls);
@@ -46,12 +47,13 @@ export default function NewListing() {
 
   function onPickFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files || []);
-    setImages(files);
+    setImages(files.slice(0, 12)); // small sanity cap
   }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErr(undefined);
+    setOkMsg(undefined);
 
     if (!form.title.trim()) return setErr("Please provide a title.");
     if (!form.location.trim()) return setErr("Please provide a location.");
@@ -59,7 +61,7 @@ export default function NewListing() {
 
     setSubmitting(true);
     try {
-      // NOTE: images are preview-only in this demo. In production upload to S3/Cloudinary first.
+      // NOTE: images are preview-only in this demo. Upload to S3/Cloudinary in production.
       const payload = {
         title: form.title.trim(),
         description: form.description,
@@ -80,14 +82,12 @@ export default function NewListing() {
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error(await res.text());
-      // Optional: you can read the new ID here if backend returns it
-      // const data = await res.json();
+      if (!res.ok) throw new Error((await res.text()) || "Failed to create listing.");
 
-      // For now, go back to dashboard
-      location.href = "/dashboard";
+      setOkMsg("Listing created successfully!");
+      setTimeout(() => (location.href = "/dashboard"), 600);
     } catch (e: any) {
-      setErr(e.message || "Failed to create listing.");
+      setErr(e?.message || "Failed to create listing.");
     } finally {
       setSubmitting(false);
     }
@@ -95,187 +95,226 @@ export default function NewListing() {
 
   return (
     <Layout>
-      {/* Page header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">New Listing</h1>
-        <p className="mt-1 text-sm text-gray-600">
-          Add a property to the marketplace. You can edit details later from your dashboard.
-        </p>
-      </div>
+      {/* Header strip (matches Home.tsx) */}
+      <section className="bg-gradient-to-b from-white to-blue-50 border-b">
+        <div className="max-w-7xl mx-auto px-6 sm:px-10 py-10">
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-gray-900">
+            Create a new listing
+          </h1>
+          <p className="mt-3 max-w-2xl text-gray-600 text-base sm:text-lg">
+            Add your property to the marketplace. You can edit details later from your dashboard.
+          </p>
+        </div>
+      </section>
 
       {/* Form card */}
-      <form
-        onSubmit={onSubmit}
-        className="mx-auto w-full max-w-4xl rounded-2xl border bg-white p-6 shadow-sm"
-      >
-        {err && (
-          <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {err}
-          </div>
-        )}
+      <section className="max-w-7xl mx-auto px-6 sm:px-10 py-10">
+        <form
+          onSubmit={onSubmit}
+          className="mx-auto w-full max-w-4xl rounded-2xl bg-white shadow-sm ring-1 ring-gray-100"
+        >
+          <div className="px-6 sm:px-8 py-8">
+            {(err || okMsg) && (
+              <div
+                className={`mb-6 rounded-lg px-4 py-3 text-sm ${
+                  err
+                    ? "border border-red-200 bg-red-50 text-red-700"
+                    : "border border-green-200 bg-green-50 text-green-700"
+                }`}
+              >
+                {err || okMsg}
+              </div>
+            )}
 
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-          {/* Title */}
-          <div className="sm:col-span-2">
-            <label className="block text-sm font-medium text-gray-700">Title</label>
-            <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
-              placeholder="e.g. 2BHK near Salt Lake"
-              value={form.title}
-              onChange={(e) => update("title", e.target.value)}
-              required
-            />
-          </div>
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              {/* Title */}
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-gray-700">Title</label>
+                <input
+                  className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                  placeholder="e.g., 2BHK near Salt Lake"
+                  value={form.title}
+                  onChange={(e) => update("title", e.target.value)}
+                  required
+                />
+              </div>
 
-          {/* Description */}
-          <div className="sm:col-span-2">
-            <label className="block text-sm font-medium text-gray-700">Description</label>
-            <textarea
-              rows={5}
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
-              placeholder="Describe the property, amenities, nearby landmarks, etc."
-              value={form.description}
-              onChange={(e) => update("description", e.target.value)}
-            />
-          </div>
+              {/* Description */}
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-gray-700">Description</label>
+                <textarea
+                  rows={5}
+                  className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                  placeholder="Describe the property, amenities, nearby landmarks, etc."
+                  value={form.description}
+                  onChange={(e) => update("description", e.target.value)}
+                />
+              </div>
 
-          {/* Price */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Price</label>
-            <input
-              type="number"
-              min={0}
-              step="1"
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
-              placeholder="5500000"
-              value={form.price}
-              onChange={(e) => update("price", e.target.value)}
-              required
-            />
-          </div>
+              {/* Price */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Price</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="1"
+                  className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                  placeholder="5500000"
+                  value={form.price}
+                  onChange={(e) => update("price", e.target.value)}
+                  required
+                />
+              </div>
 
-          {/* Currency */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Currency</label>
-            <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
-              placeholder="INR"
-              value={form.currency}
-              onChange={(e) => update("currency", e.target.value.toUpperCase())}
-            />
-          </div>
+              {/* Currency */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Currency</label>
+                <input
+                  className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                  placeholder="INR"
+                  value={form.currency}
+                  onChange={(e) => update("currency", e.target.value.toUpperCase())}
+                />
+              </div>
 
-          {/* Location */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Location</label>
-            <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
-              placeholder="Kolkata, WB"
-              value={form.location}
-              onChange={(e) => update("location", e.target.value)}
-              required
-            />
-          </div>
+              {/* Location */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Location</label>
+                <input
+                  className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                  placeholder="Kolkata, WB"
+                  value={form.location}
+                  onChange={(e) => update("location", e.target.value)}
+                  required
+                />
+              </div>
 
-          {/* Type */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Property Type</label>
-            <select
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
-              value={form.property_type}
-              onChange={(e) => update("property_type", e.target.value as FormState["property_type"])}
-            >
-              <option value="apartment">apartment</option>
-              <option value="house">house</option>
-              <option value="villa">villa</option>
-              <option value="land">land</option>
-              <option value="other">other</option>
-            </select>
-          </div>
+              {/* Property Type */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Property Type</label>
+                <select
+                  className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                  value={form.property_type}
+                  onChange={(e) =>
+                    update("property_type", e.target.value as FormState["property_type"])
+                  }
+                >
+                  <option value="apartment">apartment</option>
+                  <option value="house">house</option>
+                  <option value="villa">villa</option>
+                  <option value="land">land</option>
+                  <option value="other">other</option>
+                </select>
+              </div>
 
-          {/* Conditions */}
-          <div className="sm:col-span-2">
-            <label className="block text-sm font-medium text-gray-700">
-              Exchange Conditions (optional)
-            </label>
-            <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
-              placeholder="e.g. Prefer exchange within city"
-              value={form.conditions}
-              onChange={(e) => update("conditions", e.target.value)}
-            />
-          </div>
+              {/* Conditions */}
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Exchange Conditions (optional)
+                </label>
+                <input
+                  className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                  placeholder="e.g., Prefer exchange within city"
+                  value={form.conditions}
+                  onChange={(e) => update("conditions", e.target.value)}
+                />
+              </div>
 
-          {/* Contact */}
-          <div className="sm:col-span-2">
-            <label className="block text-sm font-medium text-gray-700">
-              Contact Info (optional)
-            </label>
-            <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
-              placeholder="email or phone"
-              value={form.contact_info}
-              onChange={(e) => update("contact_info", e.target.value)}
-            />
-          </div>
+              {/* Contact */}
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Contact Info (optional)
+                </label>
+                <input
+                  className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                  placeholder="email or phone"
+                  value={form.contact_info}
+                  onChange={(e) => update("contact_info", e.target.value)}
+                />
+              </div>
 
-          {/* Images */}
-          <div className="sm:col-span-2">
-            <label className="block text-sm font-medium text-gray-700">Images</label>
-            <div className="mt-1 rounded-lg border border-dashed bg-gray-50 p-4">
-              <input
-                type="file"
-                multiple
-                accept="image/*"
-                onChange={onPickFiles}
-                className="block w-full text-sm file:mr-4 file:rounded-md file:border-0 file:bg-brand-600 file:px-4 file:py-2 file:text-white file:hover:bg-brand-700"
-              />
-              {previews.length > 0 && (
-                <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  {previews.map((u, i) => (
-                    <div key={u} className="relative">
-                      <img
-                        src={u}
-                        className="h-28 w-full rounded-md border object-cover"
+              {/* Images */}
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-gray-700">Images</label>
+                <div className="mt-2 rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-5">
+                  <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-gray-600">
+                      Upload up to 12 images. We’ll preview locally (no upload yet).
+                    </p>
+                    <label className="inline-flex cursor-pointer items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        onChange={onPickFiles}
+                        className="hidden"
                       />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setImages((prev) => prev.filter((_, idx) => idx !== i))
-                        }
-                        className="absolute right-1 top-1 rounded bg-black/60 px-2 py-0.5 text-xs text-white"
-                        title="Remove"
-                      >
-                        ✕
-                      </button>
+                      Choose files
+                    </label>
+                  </div>
+
+                  {previews.length > 0 && (
+                    <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {previews.map((u, i) => (
+                        <div key={u} className="relative group">
+                          <img
+                            src={u}
+                            alt={`preview-${i}`}
+                            className="h-28 w-full rounded-lg border object-cover"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setImages((prev) => prev.filter((_, idx) => idx !== i))
+                            }
+                            className="absolute right-1 top-1 rounded-md bg-black/60 px-2 py-0.5 text-xs text-white opacity-0 transition group-hover:opacity-100"
+                            title="Remove"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
+                  <p className="mt-2 text-xs text-gray-500">
+                    In production, upload to S3/Cloudinary and store the URLs.
+                  </p>
                 </div>
-              )}
-              <p className="mt-2 text-xs text-gray-500">
-                For demo we only preview images. In production, upload to S3/Cloudinary and save URLs.
-              </p>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="mt-8 flex items-center justify-end gap-3">
+              <a
+                href="/dashboard"
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </a>
+              <button
+                type="submit"
+                disabled={submitting}
+                className={`inline-flex items-center rounded-lg px-5 py-2 text-sm font-medium text-white transition
+                  ${submitting ? "bg-blue-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}
+                `}
+              >
+                {submitting && (
+                  <svg
+                    className="mr-2 h-5 w-5 animate-spin"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" fill="currentColor" />
+                  </svg>
+                )}
+                {submitting ? "Creating…" : "Create"}
+              </button>
             </div>
           </div>
-        </div>
-
-        {/* Actions */}
-        <div className="mt-6 flex items-center justify-end gap-3">
-          <a
-            href="/dashboard"
-            className="rounded-md border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </a>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="inline-flex items-center rounded-md bg-brand-600 px-5 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
-          >
-            {submitting ? "Creating…" : "Create"}
-          </button>
-        </div>
-      </form>
+        </form>
+      </section>
     </Layout>
   );
 }
