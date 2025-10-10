@@ -4,7 +4,7 @@
 /* Scan for class usage */
 @source "../index.html" "./**/*.{ts,tsx,js,jsx}";
 
-/* Define custom brand colors */
+/* Define custom brand colors (valid syntax for v4 + editor-friendly) */
 @theme {
   --color-brand-50:  #eef7ff;
   --color-brand-100: #d9ecff;
@@ -18,8 +18,29 @@
   --color-brand-900: #143f78;
 }
 
+/* Tailwind Language Server Compatibility  */
+/* These dummy fallbacks silence red squiggles in VS Code's CSS mode */
+:root {
+  --color-brand-50:  #eef7ff;
+  --color-brand-100: #d9ecff;
+  --color-brand-200: #baddff;
+  --color-brand-300: #8fc7ff;
+  --color-brand-400: #5faaff;
+  --color-brand-500: #3d8cf7;
+  --color-brand-600: #1f6fe0;
+  --color-brand-700: #1959b5;
+  --color-brand-800: #164a91;
+  --color-brand-900: #143f78;
+}
+
 /* Base page style */
-html, body {
-  background-color: theme(colors.gray.50);
-  color: theme(colors.gray.900);
+html,
+body {
+  /* IDE-friendly fallback colors */
+  background-color: #fafafa; /* same as gray-50 */
+  color: #111827;            /* same as gray-900 */
+
+  /* Tailwind-processed theme refs (won’t trigger errors if commented) */
+  /* background-color: theme(colors.gray.50); */
+  /* color: theme(colors.gray.900); */
 }
