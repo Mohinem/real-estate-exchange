@@ -695,25 +695,43 @@ app.post("/exchange-requests/:id/counter", async (req, res) => {
 
 // List my requests
 app.get('/exchange-requests/mine', async (req, res) => {
+  // never cache this endpoint (browser, proxy, CDNs)
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Surrogate-Control': 'no-store',
+    // responses vary by bearer token
+    'Vary': 'Authorization',
+  });
+
   const auth = authFromReq(req);
   if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
-  const role = String((req.query.role ?? 'received')).toLowerCase(); // 'received' | 'sent'
-  if (role !== 'received' && role !== 'sent') return res.status(400).json({ error: 'role must be received|sent' });
+
+  const roleRaw = String(req.query.role ?? 'received').toLowerCase();
+  const role = roleRaw === 'sent' ? 'sent' : roleRaw === 'received' ? 'received' : null;
+  if (!role) return res.status(400).json({ error: 'role must be received|sent' });
 
   try {
-    const rows = await withRlsClient(auth, async c => {
-      const sql = role === 'received'
-        ? `select * from app_public.exchange_requests
-             where to_user_id = current_setting('jwt.claims.user_id',true)::int
-             order by created_at desc limit 100`
-        : `select * from app_public.exchange_requests
-             where from_user_id = current_setting('jwt.claims.user_id',true)::int
-             order by created_at desc limit 100`;
-      return (await c.query(sql)).rows;
+    const rows = await withRlsClient(auth, async (c) => {
+      const sql =
+        role === 'received'
+          ? `select * from app_public.exchange_requests
+               where to_user_id = current_setting('jwt.claims.user_id',true)::int
+               order by created_at desc limit 100`
+          : `select * from app_public.exchange_requests
+               where from_user_id = current_setting('jwt.claims.user_id',true)::int
+               order by created_at desc limit 100`;
+      const r = await c.query(sql);
+      return r.rows;
     });
-    res.json({ items: rows });
-  } catch (e:any) { console.error(e); res.status(500).json({ error: 'server error' }); }
+    return res.json({ items: rows });
+  } catch (e: any) {
+    console.error(e);
+    return res.status(500).json({ error: 'server error' });
+  }
 });
+
 
 // COMPLETE (either participant; closes both listings)
 app.post('/exchanges/:id/complete', async (req, res) => {

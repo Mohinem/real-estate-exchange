@@ -17,12 +17,20 @@ export default function MySwaps() {
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
 
+  // --- Helper: broadcast to other tabs to invalidate their list
+  function broadcastInvalidate() {
+    try {
+      localStorage.setItem("swaps:invalidate", String(Date.now()));
+    } catch {}
+  }
+
   // --- Helper: Load swaps for given role ---
   async function load(role: Tab) {
     setLoading(true);
     setErr(null);
     try {
-      const { items } = await listMySwapRequests({ role });
+      // Add a tiny cache buster param in case the lib caches by URL
+      const { items } = await listMySwapRequests({ role, _bust: Date.now() } as any);
       setItems(items || []);
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -42,37 +50,63 @@ export default function MySwaps() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  // --- Listen for cross-tab invalidations ---
+  React.useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key === "swaps:invalidate") {
+        // Refetch the currently visible tab immediately
+        load(tab);
+      }
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [tab]); // rebind when tab changes
+
+  // --- Optimistic helpers ---
+  function removeItemOptimistically(id: number) {
+    setItems((prev) => prev.filter((r) => Number(r.id) !== Number(id)));
+  }
+
   // --- Actions ---
   async function onAccept(id: number) {
     if (!confirm("Accept this swap proposal?")) return;
     try {
+      // optimistic: remove from list immediately
+      removeItemOptimistically(id);
       await acceptRequest(id);
-      alert("✅ Swap accepted!");
-      await load(tab);
+      broadcastInvalidate();
+      // we stay on the same tab; load to reflect any side effects
+      load(tab);
     } catch (e: any) {
       alert(e.message || "Failed to accept");
+      // fallback to full reload
+      load(tab);
     }
   }
 
   async function onDecline(id: number) {
     if (!confirm("Decline this swap proposal?")) return;
     try {
+      removeItemOptimistically(id);
       await declineRequest(id);
-      alert("❌ Swap declined.");
-      await load(tab);
+      broadcastInvalidate();
+      load(tab);
     } catch (e: any) {
       alert(e.message || "Failed to decline");
+      load(tab);
     }
   }
 
   async function onCancel(id: number) {
     if (!confirm("Cancel this swap request?")) return;
     try {
+      removeItemOptimistically(id);
       await cancelRequest(id);
-      alert("🚫 Swap request canceled.");
-      await load(tab);
+      broadcastInvalidate();
+      load(tab);
     } catch (e: any) {
       alert(e.message || "Failed to cancel");
+      load(tab);
     }
   }
 
@@ -81,14 +115,19 @@ export default function MySwaps() {
     if (cash == null) return;
     const msg = prompt("Message (optional):", "");
     try {
+      // optimistic: remove the old incoming request immediately
+      removeItemOptimistically(id);
       await counterRequest(id, {
         cashAdjustment: Number(cash) || 0,
         message: msg?.trim() || undefined,
       });
-      alert("🔁 Counter-offer sent!");
-      setTab("sent"); // switch to sent after countering
+      broadcastInvalidate();
+      // Switch to Sent and fetch fresh so the new counter shows up
+      setTab("sent");
+      // no await here; use effect will load
     } catch (e: any) {
       alert(e.message || "Failed to counter");
+      load(tab);
     }
   }
 
@@ -136,6 +175,14 @@ export default function MySwaps() {
           <div className="mt-4 grid gap-4">
             {items.map((r: any) => {
               const isPending = r.status === "pending";
+              // Normalize status text (server uses 'rejected' on decline)
+              const statusLabel =
+                r.status === "rejected"
+                  ? "rejected"
+                  : r.status === "accepted"
+                  ? "accepted"
+                  : r.status;
+
               return (
                 <div
                   key={r.id}
@@ -150,14 +197,14 @@ export default function MySwaps() {
                         Status:{" "}
                         <span
                           className={`font-medium ${
-                            r.status === "accepted"
+                            statusLabel === "accepted"
                               ? "text-green-600"
-                              : r.status === "declined"
+                              : statusLabel === "rejected"
                               ? "text-red-600"
                               : "text-gray-800"
                           }`}
                         >
-                          {r.status}
+                          {statusLabel}
                         </span>
                         {r.cash_adjustment ? (
                           <span className="ml-2">
