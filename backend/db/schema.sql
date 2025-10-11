@@ -499,3 +499,28 @@ CREATE POLICY exchanges_participant_update
 -- ✅ END EXCHANGES RLS CONFIGURATION
 -- ===========================================================
 
+-- 20251010_hard_delete_listings.sql
+
+-- 1) Exchanges must disappear when a referenced listing is deleted
+alter table app_public.exchanges
+  drop constraint if exists exchanges_listing_a_id_fkey,
+  add  constraint exchanges_listing_a_id_fkey
+    foreign key (listing_a_id) references app_public.listings(id) on delete cascade;
+
+alter table app_public.exchanges
+  drop constraint if exists exchanges_listing_b_id_fkey,
+  add  constraint exchanges_listing_b_id_fkey
+    foreign key (listing_b_id) references app_public.listings(id) on delete cascade;
+
+-- 2) Any listing pointing to an exchange via reserved_exchange_id should not block
+--    when that exchange is deleted as a side effect; null it out automatically.
+alter table app_public.listings
+  drop constraint if exists listings_reserved_exchange_id_fkey,
+  add  constraint listings_reserved_exchange_id_fkey
+    foreign key (reserved_exchange_id) references app_public.exchanges(id) on delete set null;
+
+-- Notes:
+-- - images(listing_id) already has ON DELETE CASCADE (good).
+-- - exchange_requests(from_listing_id / to_listing_id) already have ON DELETE CASCADE (good).
+-- - messages(exchange_id) → exchange_requests(id) is ON DELETE CASCADE via the ER chain (good).
+-- - completed_exchanges(exchange_id) → exchange_requests(id) is ON DELETE CASCADE (good).

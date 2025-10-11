@@ -5,9 +5,7 @@ function decodeJwtPayload<T = any>(token: string): T | null {
   try {
     const base64Url = token.split(".")[1];
     if (!base64Url) return null;
-    // base64url -> base64
     const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-    // pad
     const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
     const json = decodeURIComponent(
       atob(padded)
@@ -20,7 +18,6 @@ function decodeJwtPayload<T = any>(token: string): T | null {
     return null;
   }
 }
-
 
 type Props = { children: React.ReactNode };
 
@@ -54,9 +51,8 @@ export default function Layout({ children }: Props) {
       payload?.name ||
       (payload?.email ? payload.email.split("@")[0] : null) ||
       (payload?.user_id ? `User #${payload.user_id}` : null);
-  
     setUserName(name);
-  }, [authed]);  
+  }, [authed]);
 
   function logout() {
     localStorage.removeItem("jwt");
@@ -66,7 +62,8 @@ export default function Layout({ children }: Props) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    // Make the whole page a column that fills the viewport
+    <div className="min-h-screen flex flex-col bg-gray-50">
       {/* Header */}
       <header className="border-b bg-white">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
@@ -110,18 +107,12 @@ export default function Layout({ children }: Props) {
               </div>
             )}
             {authed ? (
-              <button
-                onClick={logout}
-                className="rounded-md border px-3 py-1.5 text-sm"
-              >
+              <button onClick={logout} className="rounded-md border px-3 py-1.5 text-sm">
                 Logout
               </button>
             ) : (
               <>
-                <Link
-                  to="/login"
-                  className="rounded-md border px-3 py-1.5 text-sm"
-                >
+                <Link to="/login" className="rounded-md border px-3 py-1.5 text-sm">
                   Login
                 </Link>
                 <Link
@@ -136,23 +127,17 @@ export default function Layout({ children }: Props) {
         </div>
       </header>
 
-      {/* Content */}
-      <main>{children}</main>
+      {/* Content grows to push footer down */}
+      <main className="flex-1">{children}</main>
 
-      {/* Footer */}
-      <footer className="mt-12 border-t bg-white">
+      {/* Footer pinned to bottom */}
+      <footer className="border-t bg-white">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 text-sm text-gray-600 flex items-center justify-between">
           <div>© {new Date().getFullYear()} Real Estate Exchange.</div>
           <div className="flex gap-4">
-            <a className="hover:underline" href="#">
-              Terms
-            </a>
-            <a className="hover:underline" href="#">
-              Privacy
-            </a>
-            <a className="hover:underline" href="#">
-              Contact
-            </a>
+            <a className="hover:underline" href="#">Terms</a>
+            <a className="hover:underline" href="#">Privacy</a>
+            <a className="hover:underline" href="#">Contact</a>
           </div>
         </div>
       </footer>

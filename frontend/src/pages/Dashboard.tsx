@@ -35,9 +35,7 @@ export default function Dashboard() {
   const [submitting, setSubmitting] = React.useState(false);
 
   const token = typeof window !== "undefined" ? localStorage.getItem("jwt") : null;
-  const authHeader = token
-    ? ({ Authorization: `Bearer ${token}` } as Record<string, string>)
-    : ({} as Record<string, string>);
+  const authHeader = token ? ({ Authorization: `Bearer ${token}` } as Record<string, string>) : {};
 
   async function fetchMine() {
     setLoading(true);
@@ -62,10 +60,7 @@ export default function Dashboard() {
   async function onDelete(id: number) {
     if (!confirm("Delete this listing? This cannot be undone.")) return;
     try {
-      const res = await fetch(`${API_URL}/api/listings/${id}`, {
-        method: "DELETE",
-        headers: authHeader,
-      });
+      const res = await fetch(`${API_URL}/api/listings/${id}`, { method: "DELETE", headers: authHeader });
       if (!res.ok) throw new Error(await res.text());
       setItems((prev) => prev.filter((l) => l.id !== id));
     } catch (e: any) {
@@ -83,15 +78,10 @@ export default function Dashboard() {
     const payload = {
       title: String(form.get("title") || "").trim(),
       description: String(form.get("description") || "") || null,
-      price:
-        form.get("price") !== null && form.get("price") !== ""
-          ? Number(form.get("price"))
-          : null,
+      price: form.get("price") !== null && form.get("price") !== "" ? Number(form.get("price")) : null,
       currency: String(form.get("currency") || "") || null,
       location: String(form.get("location") || "") || null,
-      propertyType:
-        (String(form.get("propertyType") || "") as Listing["property_type"]) ||
-        null,
+      propertyType: (String(form.get("propertyType") || "") as Listing["property_type"]) || null,
       conditions: String(form.get("conditions") || "") || null,
     };
 
@@ -113,8 +103,7 @@ export default function Dashboard() {
 
   return (
     <Layout>
-      {/* Use explicit max-width + horizontal padding so content NEVER hugs the left edge */}
-      <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+      <section className="mx-auto max-w-7xl px-6 sm:px-10 py-8">
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
           <div>
@@ -140,10 +129,7 @@ export default function Dashboard() {
         {loading ? (
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="flex h-full flex-col overflow-hidden rounded-xl border bg-white shadow-sm"
-              >
+              <div key={i} className="flex h-full flex-col overflow-hidden rounded-xl border bg-white shadow-sm">
                 <div className="h-40 animate-pulse bg-gray-100" />
                 <div className="p-4">
                   <div className="h-5 w-40 rounded bg-gray-200 animate-pulse" />
@@ -157,9 +143,7 @@ export default function Dashboard() {
         ) : items.length === 0 ? (
           <div className="rounded-xl border border-dashed bg-white p-10 text-center">
             <h3 className="text-lg font-semibold text-gray-900">No listings yet</h3>
-            <p className="mt-1 text-sm text-gray-600">
-              Create your first property listing to get started.
-            </p>
+            <p className="mt-1 text-sm text-gray-600">Create your first property listing to get started.</p>
             <a
               href="/new"
               className="mt-4 inline-flex items-center rounded-md bg-brand-600 px-4 py-2 text-white text-sm font-medium hover:bg-brand-700"
@@ -174,7 +158,6 @@ export default function Dashboard() {
                 key={l.id}
                 className="group flex h-full flex-col overflow-hidden rounded-xl border bg-white shadow-sm transition-shadow hover:shadow-md"
               >
-                {/* Match Browse card header */}
                 <div className="h-40 bg-gradient-to-br from-brand-100 to-white" />
                 <div className="flex flex-col flex-1 p-4">
                   <h3 className="text-lg font-semibold text-gray-900 line-clamp-1">{l.title}</h3>
@@ -184,9 +167,7 @@ export default function Dashboard() {
                     <span>·</span>
                     <span className="capitalize">{l.property_type}</span>
                     <span>·</span>
-                    <span className="font-medium text-gray-900">
-                      {formatMoney(l.price, l.currency)}
-                    </span>
+                    <span className="font-medium text-gray-900">{formatMoney(l.price, l.currency)}</span>
                   </div>
 
                   {l.description && (
@@ -220,10 +201,7 @@ export default function Dashboard() {
         {/* Edit dialog */}
         {editing && (
           <div className="fixed inset-0 z-50">
-            <div
-              className="absolute inset-0 bg-black/40"
-              onClick={() => (submitting ? null : setEditing(null))}
-            />
+            <div className="absolute inset-0 bg-black/40" onClick={() => (submitting ? null : setEditing(null))} />
             <div className="absolute inset-0 grid place-items-center p-4">
               <div className="w-full max-w-xl rounded-2xl bg-white shadow-xl">
                 <div className="flex items-center justify-between border-b px-5 py-4">
@@ -308,9 +286,7 @@ export default function Dashboard() {
                     </div>
 
                     <div className="sm:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Conditions (optional)
-                      </label>
+                      <label className="block text-sm font-medium text-gray-700">Conditions (optional)</label>
                       <input
                         name="conditions"
                         defaultValue={editing.conditions || ""}
