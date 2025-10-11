@@ -16,6 +16,7 @@ type FormState = {
 
 export default function NewListing() {
   const token = typeof window !== "undefined" ? localStorage.getItem("jwt") : null;
+  const isAuthed = !!token;
 
   const [form, setForm] = React.useState<FormState>({
     title: "",
@@ -55,13 +56,18 @@ export default function NewListing() {
     setErr(undefined);
     setOkMsg(undefined);
 
+    // Friendly check before hitting the server
+    if (!isAuthed) {
+      setErr("You must be logged in to create a listing.");
+      return;
+    }
+
     if (!form.title.trim()) return setErr("Please provide a title.");
     if (!form.location.trim()) return setErr("Please provide a location.");
     if (!form.price || Number(form.price) <= 0) return setErr("Please set a valid price.");
 
     setSubmitting(true);
     try {
-      // NOTE: images are preview-only in this demo. Upload to S3/Cloudinary in production.
       const payload = {
         title: form.title.trim(),
         description: form.description,
@@ -77,17 +83,23 @@ export default function NewListing() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: token ? `Bearer ${token}` : "",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error((await res.text()) || "Failed to create listing.");
+      if (!res.ok) {
+        // Map auth errors to friendly text; avoid exposing backend internals
+        if (res.status === 401 || res.status === 403) {
+          throw new Error("You must be logged in to create a listing.");
+        }
+        throw new Error("Could not create listing. Please try again.");
+      }
 
       setOkMsg("Listing created successfully!");
       setTimeout(() => (location.href = "/dashboard"), 600);
     } catch (e: any) {
-      setErr(e?.message || "Failed to create listing.");
+      setErr(e?.message || "Could not create listing. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -114,6 +126,19 @@ export default function NewListing() {
           className="mx-auto w-full max-w-4xl rounded-2xl bg-white shadow-sm ring-1 ring-gray-100"
         >
           <div className="px-6 sm:px-8 py-8">
+            {/* Friendly auth banner when not logged in */}
+            {!isAuthed && (
+              <div className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <div>You must be logged in to create a listing.</div>
+                <a
+                  href="/login"
+                  className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-white hover:bg-blue-700"
+                >
+                  Login
+                </a>
+              </div>
+            )}
+
             {(err || okMsg) && (
               <div
                 className={`mb-6 rounded-lg px-4 py-3 text-sm ${
