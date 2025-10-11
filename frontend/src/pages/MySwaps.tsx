@@ -7,6 +7,7 @@ import {
   declineRequest,
   cancelRequest,
   counterRequest,
+  markReceivedSwapsSeen, // <- mark unseen received swaps as seen
 } from "../lib/exchanges";
 
 type Tab = "received" | "sent";
@@ -17,21 +18,27 @@ export default function MySwaps() {
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
 
-  // --- Helper: broadcast to other tabs to invalidate their list
+  // --- Broadcast to other tabs to invalidate their cached counters/lists
   function broadcastInvalidate() {
     try {
       localStorage.setItem("swaps:invalidate", String(Date.now()));
     } catch {}
   }
 
-  // --- Helper: Load swaps for given role ---
+  // --- Load swaps for given role ---
   async function load(role: Tab) {
     setLoading(true);
     setErr(null);
     try {
-      // Add a tiny cache buster param in case the lib caches by URL
       const { items } = await listMySwapRequests({ role, _bust: Date.now() } as any);
       setItems(items || []);
+
+      // If viewing the Received tab, mark unseen items as seen on the server
+      if (role === "received") {
+        await markReceivedSwapsSeen();
+        // Let header badge (and other tabs) drop immediately
+        broadcastInvalidate();
+      }
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -39,6 +46,7 @@ export default function MySwaps() {
     }
   }
 
+  // initial + tab change
   React.useEffect(() => {
     const jwt = localStorage.getItem("jwt");
     if (!jwt) {
@@ -50,19 +58,16 @@ export default function MySwaps() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // --- Listen for cross-tab invalidations ---
+  // Cross-tab invalidations (e.g., another tab accepted/declined)
   React.useEffect(() => {
     function onStorage(e: StorageEvent) {
-      if (e.key === "swaps:invalidate") {
-        // Refetch the currently visible tab immediately
-        load(tab);
-      }
+      if (e.key === "swaps:invalidate") load(tab);
     }
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, [tab]); // rebind when tab changes
+  }, [tab]);
 
-  // --- Optimistic helpers ---
+  // Optimistic helpers
   function removeItemOptimistically(id: number) {
     setItems((prev) => prev.filter((r) => Number(r.id) !== Number(id)));
   }
@@ -71,15 +76,12 @@ export default function MySwaps() {
   async function onAccept(id: number) {
     if (!confirm("Accept this swap proposal?")) return;
     try {
-      // optimistic: remove from list immediately
-      removeItemOptimistically(id);
+      removeItemOptimistically(id); // optimistic
       await acceptRequest(id);
       broadcastInvalidate();
-      // we stay on the same tab; load to reflect any side effects
       load(tab);
     } catch (e: any) {
       alert(e.message || "Failed to accept");
-      // fallback to full reload
       load(tab);
     }
   }
@@ -115,16 +117,13 @@ export default function MySwaps() {
     if (cash == null) return;
     const msg = prompt("Message (optional):", "");
     try {
-      // optimistic: remove the old incoming request immediately
-      removeItemOptimistically(id);
+      removeItemOptimistically(id); // old incoming request disappears immediately
       await counterRequest(id, {
         cashAdjustment: Number(cash) || 0,
         message: msg?.trim() || undefined,
       });
       broadcastInvalidate();
-      // Switch to Sent and fetch fresh so the new counter shows up
-      setTab("sent");
-      // no await here; use effect will load
+      setTab("sent"); // useEffect will reload automatically
     } catch (e: any) {
       alert(e.message || "Failed to counter");
       load(tab);
@@ -175,7 +174,6 @@ export default function MySwaps() {
           <div className="mt-4 grid gap-4">
             {items.map((r: any) => {
               const isPending = r.status === "pending";
-              // Normalize status text (server uses 'rejected' on decline)
               const statusLabel =
                 r.status === "rejected"
                   ? "rejected"

@@ -1,6 +1,34 @@
 // frontend/src/lib/exchanges.ts
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
+export async function getUnseenReceivedCount() {
+  const token = localStorage.getItem("jwt") || "";
+  const r = await fetch(`${API_URL}/exchange-requests/unseen-count?bust=${Date.now()}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    cache: "no-store",
+  });
+  if (!r.ok) return 0;
+  const { count } = await r.json();
+  return Number(count) || 0;
+}
+
+// --- NEW: mark all received swaps as seen ---
+export async function markReceivedSwapsSeen() {
+  const token = localStorage.getItem("jwt") || "";
+  const r = await fetch(`${API_URL}/exchange-requests/mark-seen`, {
+    method: "POST",
+    headers: token
+      ? {
+          Authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        }
+      : { "content-type": "application/json" },
+    body: "{}",
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return true;
+}
+
 function authHeaders() {
   const jwt = localStorage.getItem("jwt");
   return {
@@ -11,7 +39,6 @@ function authHeaders() {
 
 async function getJsonWithFallback(urls: string[]) {
   const headers = authHeaders();
-
   let lastErr = "";
   for (const url of urls) {
     try {
@@ -19,11 +46,9 @@ async function getJsonWithFallback(urls: string[]) {
       if (res.ok) {
         const ct = res.headers.get("content-type") || "";
         if (ct.includes("application/json")) return res.json();
-        // If backend returned HTML for some reason, try next candidate
         lastErr = "Server returned non-JSON response.";
         continue;
       }
-      // For 404 try next, for others surface the body
       if (res.status !== 404) {
         lastErr = (await res.text().catch(() => "")) || `HTTP ${res.status}`;
         break;
@@ -37,18 +62,17 @@ async function getJsonWithFallback(urls: string[]) {
 
 // ---- Public API -------------------------------------------------------------
 
-// List my swap requests
 export async function listMySwapRequests({ role }: { role: "received" | "sent" }) {
   const qs = `role=${encodeURIComponent(role)}`;
   const res = await fetch(`${API_URL}/exchange-requests/mine?${qs}`, {
     headers: authHeaders(),
     credentials: "include",
   });
-  if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
-  return res.json(); // { items: [...] }
+  if (!res.ok)
+    throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
+  return res.json();
 }
 
-// Create new proposal
 export async function createRequest(payload: {
   fromListingId: number;
   toListingId: number;
@@ -61,18 +85,19 @@ export async function createRequest(payload: {
     credentials: "include",
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
+  if (!res.ok)
+    throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
   return res.json();
 }
 
-// Actions
 export async function acceptRequest(id: number) {
   const res = await fetch(`${API_URL}/exchange-requests/${id}/accept`, {
     method: "POST",
     headers: authHeaders(),
     credentials: "include",
   });
-  if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
+  if (!res.ok)
+    throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
   return res.json();
 }
 
@@ -82,7 +107,8 @@ export async function declineRequest(id: number) {
     headers: authHeaders(),
     credentials: "include",
   });
-  if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
+  if (!res.ok)
+    throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
   return res.json();
 }
 
@@ -92,17 +118,22 @@ export async function cancelRequest(id: number) {
     headers: authHeaders(),
     credentials: "include",
   });
-  if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
+  if (!res.ok)
+    throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
   return res.json();
 }
 
-export async function counterRequest(id: number, body: { cashAdjustment?: number; message?: string }) {
+export async function counterRequest(
+  id: number,
+  body: { cashAdjustment?: number; message?: string }
+) {
   const res = await fetch(`${API_URL}/exchange-requests/${id}/counter`, {
     method: "POST",
     headers: authHeaders(),
     credentials: "include",
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
+  if (!res.ok)
+    throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
   return res.json();
 }

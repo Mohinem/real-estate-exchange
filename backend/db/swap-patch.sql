@@ -94,3 +94,30 @@ create policy listings_update_participants on app_public.listings
              or e.b_user_id = current_setting('jwt.claims.user_id', true)::int)
     )
   );
+
+-- ========= Unseen received-swaps badge support =========
+alter table app_public.exchange_requests
+  add column if not exists is_seen boolean not null default false;
+
+create index if not exists exreq_unseen_to_user_pending_idx
+  on app_public.exchange_requests(to_user_id, status, is_seen);
+
+drop policy if exists exreq_mark_seen_only_recipient on app_public.exchange_requests;
+create policy exreq_mark_seen_only_recipient on app_public.exchange_requests
+  for update
+  using (
+    exists (
+      select 1
+      from app_public.listings l_to
+      where l_to.id = exchange_requests.to_listing_id
+        and l_to.owner_id = current_setting('jwt.claims.user_id', true)::int
+    )
+  )
+  with check (
+    exists (
+      select 1
+      from app_public.listings l_to
+      where l_to.id = exchange_requests.to_listing_id
+        and l_to.owner_id = current_setting('jwt.claims.user_id', true)::int
+    )
+  );

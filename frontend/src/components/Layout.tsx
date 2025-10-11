@@ -31,13 +31,16 @@ function navClass({ isActive }: { isActive: boolean }) {
 export default function Layout({ children }: Props) {
   const [authed, setAuthed] = React.useState<boolean>(!!localStorage.getItem("jwt"));
   const [userName, setUserName] = React.useState<string | null>(null);
+  const [unseen, setUnseen] = React.useState<number>(0); // badge for received swaps
 
+  // watch login/logout across tabs
   React.useEffect(() => {
     const onStorage = () => setAuthed(!!localStorage.getItem("jwt"));
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  // derive display name from JWT
   React.useEffect(() => {
     const token = localStorage.getItem("jwt");
     if (!token) {
@@ -54,8 +57,50 @@ export default function Layout({ children }: Props) {
     setUserName(name);
   }, [authed]);
 
+  // poll unseen count for received swaps; refresh on focus & cross-tab invalidations
+  React.useEffect(() => {
+    let timer: number | undefined;
+
+    async function refresh() {
+      if (!localStorage.getItem("jwt")) {
+        setUnseen(0);
+        return;
+      }
+      try {
+        const { getUnseenReceivedCount } = await import("../lib/exchanges");
+        const n = await getUnseenReceivedCount();
+        setUnseen(Number.isFinite(n) ? n : 0);
+      } catch {
+        setUnseen(0);
+      }
+    }
+
+    function onFocus() {
+      refresh();
+    }
+    function onStorage(e: StorageEvent) {
+      if (e.key === "swaps:invalidate") refresh();
+    }
+
+    refresh();
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("storage", onStorage);
+    // gentle poll
+    timer = window.setInterval(refresh, 15000);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("storage", onStorage);
+      if (timer) clearInterval(timer);
+    };
+  }, [authed]);
+
   function logout() {
     localStorage.removeItem("jwt");
+    try {
+      // notify other tabs to clear badges/state
+      localStorage.setItem("swaps:invalidate", String(Date.now()));
+    } catch {}
     setAuthed(false);
     setUserName(null);
     window.location.href = "/login";
@@ -90,7 +135,18 @@ export default function Layout({ children }: Props) {
                     Dashboard
                   </NavLink>
                   <NavLink to="/swaps" className={navClass}>
-                    My Swaps
+                    <span className="relative inline-flex items-center">
+                      My Swaps
+                      {unseen > 0 && (
+                        <span
+                          className="ml-2 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white"
+                          aria-label={`${unseen} unseen swaps`}
+                          title={`${unseen} unseen swaps`}
+                        >
+                          {unseen > 99 ? "99+" : unseen}
+                        </span>
+                      )}
+                    </span>
                   </NavLink>
                   <NavLink to="/inbox" className={navClass}>
                     Inbox
@@ -135,9 +191,15 @@ export default function Layout({ children }: Props) {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 text-sm text-gray-600 flex items-center justify-between">
           <div>© {new Date().getFullYear()} Real Estate Exchange.</div>
           <div className="flex gap-4">
-            <a className="hover:underline" href="#">Terms</a>
-            <a className="hover:underline" href="#">Privacy</a>
-            <a className="hover:underline" href="#">Contact</a>
+            <a className="hover:underline" href="#">
+              Terms
+            </a>
+            <a className="hover:underline" href="#">
+              Privacy
+            </a>
+            <a className="hover:underline" href="#">
+              Contact
+            </a>
           </div>
         </div>
       </footer>

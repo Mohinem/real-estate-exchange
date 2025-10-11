@@ -693,15 +693,13 @@ app.post("/exchange-requests/:id/counter", async (req, res) => {
 });
 
 
-// List my requests
+// List my requests (no-cache; marks received as seen)
 app.get('/exchange-requests/mine', async (req, res) => {
-  // never cache this endpoint (browser, proxy, CDNs)
   res.set({
     'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
     'Pragma': 'no-cache',
     'Expires': '0',
     'Surrogate-Control': 'no-store',
-    // responses vary by bearer token
     'Vary': 'Authorization',
   });
 
@@ -714,17 +712,31 @@ app.get('/exchange-requests/mine', async (req, res) => {
 
   try {
     const rows = await withRlsClient(auth, async (c) => {
+      if (role === 'received') {
+        // Mark all my pending received requests as seen
+        await c.query(
+          `update app_public.exchange_requests
+             set is_seen = true, updated_at = now()
+           where to_user_id = current_setting('jwt.claims.user_id',true)::int
+             and status = 'pending'
+             and is_seen = false`
+        );
+      }
+
       const sql =
         role === 'received'
           ? `select * from app_public.exchange_requests
                where to_user_id = current_setting('jwt.claims.user_id',true)::int
-               order by created_at desc limit 100`
+               order by created_at desc
+               limit 100`
           : `select * from app_public.exchange_requests
                where from_user_id = current_setting('jwt.claims.user_id',true)::int
-               order by created_at desc limit 100`;
+               order by created_at desc
+               limit 100`;
       const r = await c.query(sql);
       return r.rows;
     });
+
     return res.json({ items: rows });
   } catch (e: any) {
     console.error(e);
@@ -767,6 +779,89 @@ app.post('/exchanges/:id/complete', async (req, res) => {
     client.release();
   }
 });
+
+// Unseen count for received swaps (pending only)
+app.get('/exchange-requests/unseen-count', async (req, res) => {
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Surrogate-Control': 'no-store',
+    'Vary': 'Authorization',
+  });
+
+  const auth = authFromReq(req);
+  if (auth.role === 'anonymous') return res.json({ count: 0 });
+
+  try {
+    const { rows } = await withRlsClient(auth, (c) =>
+      c.query(
+        `select count(*)::int as count
+           from app_public.exchange_requests
+          where to_user_id = current_setting('jwt.claims.user_id',true)::int
+            and status = 'pending'
+            and is_seen = false`
+      )
+    );
+    return res.json({ count: rows[0]?.count ?? 0 });
+  } catch (e) {
+    console.error(e);
+    return res.json({ count: 0 });
+  }
+});
+
+// --- Unseen received swaps: count ---
+app.get('/exchange-requests/unseen-count', async (req, res) => {
+  const auth = authFromReq(req);
+  if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
+
+  try {
+    const row = await withRlsClient(auth, async c => {
+      const r = await c.query(
+        `
+        select count(*)::int as count
+        from app_public.exchange_requests er
+        where er.to_user_id = current_setting('jwt.claims.user_id', true)::int
+          and coalesce(er.is_seen, false) = false
+          and er.status = 'pending'
+        `
+      );
+      return r.rows[0] || { count: 0 };
+    });
+    res.json(row);
+  } catch (e:any) {
+    console.error(e);
+    res.status(500).json({ error: 'server error' });
+  }
+});
+
+// --- Mark all currently unseen received swaps as seen ---
+app.post('/exchange-requests/mark-seen', async (req, res) => {
+  const auth = authFromReq(req);
+  if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
+
+  try {
+    const info = await withRlsClient(auth, async c => {
+      const r = await c.query(
+        `
+        update app_public.exchange_requests er
+           set is_seen = true,
+               updated_at = now()
+         where er.to_user_id = current_setting('jwt.claims.user_id', true)::int
+           and coalesce(er.is_seen, false) = false
+           and er.status = 'pending'
+        `
+      );
+      return { updated: Number(r.rowCount || 0) };
+    });
+    res.json(info);
+  } catch (e:any) {
+    console.error(e);
+    res.status(500).json({ error: 'server error' });
+  }
+});
+
+
 
 // (Optional) CANCEL active exchange (mutual or admin flow) — mark active->cancelled and unreserve listings.
 
