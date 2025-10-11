@@ -60,6 +60,19 @@ export default function ListingCard({ l, bare = false, className = '' }: Props) 
       </article>
     );
 
+  // Uses brand variable if present; otherwise falls back to Tailwind blues
+  const viewBtnClasses = [
+    'inline-flex items-center gap-1.5 w-fit',
+    'rounded-lg px-3.5 py-2 text-sm font-semibold',
+    // Fallback colors FIRST, then variable override.
+    'bg-blue-600 hover:bg-blue-700 active:bg-blue-800',
+    'text-white shadow-sm',
+    'transition-colors duration-150',
+    'bg-[--color-brand-600] hover:bg-[--color-brand-700] active:bg-[--color-brand-800]',
+    'focus-visible:outline-none focus-visible:ring-2',
+    'focus-visible:ring-[--color-brand-400] focus-visible:ring-offset-1',
+  ].join(' ');
+
   return (
     <CardChrome>
       {/* Media / banner */}
@@ -131,13 +144,26 @@ export default function ListingCard({ l, bare = false, className = '' }: Props) 
 
         <div className="flex-1" />
 
+        {/* Primary action as a real button */}
         <div className="pt-4">
           <Link
             to={`/listing/${l.id}`}
-            className="inline-flex items-center rounded-md px-3 py-2 text-sm font-medium text-[--color-brand-700] hover:bg-brand-50/40 focus-visible:ring-2 focus-visible:ring-[--color-brand-400] outline-none"
+            className={viewBtnClasses}
             aria-label={`View details for ${l.title}`}
           >
             View details
+            <svg
+              className="h-4 w-4"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                fillRule="evenodd"
+                d="M10.293 3.293a1 1 0 011.414 0l5 5a1 1 0 010 1.414l-5 5a1 1 0 01-1.414-1.414L13.586 10H4a1 1 0 110-2h9.586l-3.293-3.293a1 1 0 010-1.414z"
+                clipRule="evenodd"
+              />
+            </svg>
           </Link>
         </div>
       </div>
