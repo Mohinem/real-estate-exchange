@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import { parseJwt, signJwt } from './auth';
 import { pool, withRlsClient } from './db';
+import { makeMessagesRouter } from './messages';
 
 const app = express();
 
@@ -12,6 +13,8 @@ app.use(cors({ origin: allowed.length ? allowed : true, credentials: true }));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(parseJwt);
+
+app.use('/inbox', makeMessagesRouter(pool));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
@@ -239,22 +242,36 @@ app.post('/exchanges', async (req, res) => {
 
 // ------------ MESSAGES -------------
 app.post('/messages', async (req, res) => {
-  const auth = authFromReq(req);
+  const auth = (req as any).jwt || { role: 'anonymous' };
   if (auth.role === 'anonymous') return res.status(401).json({ error: 'auth required' });
-  try {
-    const { exchangeId, body } = req.body ?? {};
-    const row = await withRlsClient(auth, async (c) => {
-      const r = await c.query(
-        `insert into app_public.messages(exchange_id, sender_id, body)
-         values ($1, (current_setting('jwt.claims.user_id',true))::int, $2)
-         returning id, body, created_at`,
-        [exchangeId, body]
-      );
-      return r.rows[0];
-    });
-    res.json(row);
-  } catch (e:any) { console.error(e); res.status(400).json({ error: String(e.message || e) }); }
+
+  const { exchangeId, body } = req.body ?? {};
+  if (!exchangeId || !String(body).trim()) return res.status(400).json({ error: 'invalid payload' });
+
+  const q = await pool.query(
+    `select from_user_id, to_user_id from app_public.exchange_requests where id=$1`,
+    [exchangeId]
+  );
+  if (!q.rowCount) return res.status(404).json({ error: 'exchange_not_found' });
+
+  const { from_user_id, to_user_id } = q.rows[0];
+  const me = Number((req as any).jwt?.user_id);
+  if (me !== from_user_id && me !== to_user_id) return res.status(403).json({ error: 'forbidden' });
+  const recipient = me === from_user_id ? to_user_id : from_user_id;
+
+  const row = await withRlsClient((req as any).jwt, async (c) => {
+    const r = await c.query(
+      `insert into app_public.messages (exchange_id, from_user_id, to_user_id, body)
+       values ($1,$2,$3,$4)
+       returning id, exchange_id, from_user_id, to_user_id, body, is_read, created_at`,
+      [exchangeId, me, recipient, String(body).trim()]
+    );
+    return r.rows[0];
+  });
+
+  res.json(row);
 });
+
 
 // Get current user listings
 app.get('/api/listings/mine', async (req, res) => {
