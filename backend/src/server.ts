@@ -4,6 +4,7 @@ import cors from 'cors';
 import { parseJwt, signJwt } from './auth';
 import { pool, withRlsClient } from './db';
 import { makeMessagesRouter } from './messages';
+import { makeConversationsRouter } from './conversations';
 
 const app = express();
 
@@ -15,6 +16,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(parseJwt);
 
 app.use('/inbox', makeMessagesRouter(pool));
+app.use('/conversations', makeConversationsRouter(pool));  
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
