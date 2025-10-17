@@ -1,16 +1,28 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { parseJwt, signJwt } from './auth';
+import { parseJwt, requireAuth, signJwt } from "./auth";
 import { pool, withRlsClient } from './db';
 import { makeMessagesRouter } from './messages';
 import { makeConversationsRouter } from './conversations';
+import authRouter from "./auth";  
+
 
 const app = express();
 
+// --- ✅ Force CORS headers manually ---
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "http://localhost:5173");
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
+  next();
+});
+
 // CORS
-const allowed = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-app.use(cors({ origin: allowed.length ? allowed : true, credentials: true }));
+// const allowed = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+// app.use(cors({ origin: allowed.length ? allowed : true, credentials: true }));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(parseJwt);
@@ -19,6 +31,9 @@ app.use('/inbox', makeMessagesRouter(pool));
 app.use('/conversations', makeConversationsRouter(pool));  
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
+
+// ⬅️ add this line to mount the /auth router (this provides /auth/me)
+app.use("/auth", authRouter);
 
 // ------------ AUTH -------------
 app.post('/auth/login', async (req, res) => {
@@ -880,7 +895,90 @@ app.post('/exchange-requests/mark-seen', async (req, res) => {
   }
 });
 
+// --- Admin-only test route ---
+app.get("/admin/data", parseJwt, requireAuth, async (req: any, res) => {
+  try {
+    // role comes from JWT parsed by parseJwt()
+    const role: string | undefined = req?.jwt?.role ?? req?.user?.role;
+    if (role !== "app_admin" && role !== "admin") {
+      return res.status(403).json({ error: "forbidden" });
+    }
 
+    // Dummy payload for now (replace with real queries later)
+    return res.json({
+      message: "Admin-only data loaded successfully.",
+      usersCount: 42,
+      listingsPending: 3,
+    });
+  } catch (err) {
+    console.error("Error in /admin/data:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+// Small helper: only allow admins
+function assertAdmin(req: any, res: any) {
+  const role: string | undefined = req?.jwt?.role ?? req?.user?.role;
+  if (role !== "app_admin" && role !== "admin") {
+    res.status(403).json({ error: "forbidden" });
+    return false;
+  }
+  return true;
+}
+
+// GET /admin/users  -> list users (admin only)
+app.get("/admin/users", parseJwt, requireAuth, async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  try {
+    const { rows } = await pool.query(
+      `
+      select
+        id,
+        email,
+        display_name,
+        case when is_admin then 'app_admin' else 'app_user' end as role
+      from app_public.users
+      order by id asc
+      `
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error("Error /admin/users:", err);
+    res.status(500).json({ error: "server_error" });
+  }
+});
+
+// GET /admin/listings  -> list listings (admin only)
+app.get("/admin/listings", parseJwt, requireAuth, async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  try {
+    // Optional pagination
+    const limit = Math.min(Number(req.query.limit ?? 100), 500);
+    const offset = Math.max(Number(req.query.offset ?? 0), 0);
+
+    const { rows } = await pool.query(
+      `
+      select
+        id,
+        title,
+        location,
+        price,
+        currency,
+        property_type as "propertyType",
+        is_active
+      from app_public.listings
+      order by created_at desc
+      limit $1 offset $2
+      `,
+      [limit, offset]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error("Error /admin/listings:", err);
+    res.status(500).json({ error: "server_error" });
+  }
+});
 
 // (Optional) CANCEL active exchange (mutual or admin flow) — mark active->cancelled and unreserve listings.
 
