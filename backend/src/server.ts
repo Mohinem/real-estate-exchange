@@ -918,13 +918,35 @@ app.get("/admin/data", parseJwt, requireAuth, async (req: any, res) => {
 
 // Small helper: only allow admins
 function assertAdmin(req: any, res: any) {
-  const role: string | undefined = req?.jwt?.role ?? req?.user?.role;
+  const role = req?.jwt?.role ?? req?.user?.role;
+  const uid =
+    req?.jwt?.user_id ??
+    req?.user?.user_id ??
+    (req?.jwt ? JSON.stringify(req.jwt) : "unknown");
+
+  console.group("%c[assertAdmin Diagnostics]", "color:#0bf;font-weight:bold;");
+  console.log("🔍 user_id:", uid);
+  console.log("🧩 role:", role);
+  console.log("🔐 req.jwt:", req.jwt);
+  console.log("🔐 req.user:", req.user);
+  console.log("🚦 allowedRoles: ['app_admin', 'admin']");
+  console.groupEnd();
+
   if (role !== "app_admin" && role !== "admin") {
+    console.warn(
+      "🚫 assertAdmin → Access denied. role=",
+      role,
+      "user_id=",
+      uid
+    );
     res.status(403).json({ error: "forbidden" });
     return false;
   }
+
+  console.log("✅ assertAdmin → Access granted for user_id:", uid, "role:", role);
   return true;
 }
+
 
 // GET /admin/users  -> list users (admin only)
 app.get("/admin/users", parseJwt, requireAuth, async (req, res) => {

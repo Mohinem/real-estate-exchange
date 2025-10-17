@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+// frontend/src/pages/Admin.tsx
+import React, { useEffect, useMemo, useState } from "react";
 import Layout from "../components/Layout";
 import { useAuth } from "../auth/AuthProvider";
 
@@ -20,13 +21,18 @@ type Listing = {
 };
 
 export default function Admin() {
-  const { user } = useAuth();
+  const { status, user } = useAuth();
   const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
   const [users, setUsers] = useState<User[]>([]);
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const isAdmin = useMemo(
+    () => status === "authed" && (user?.role === "app_admin" || user?.role === "admin"),
+    [status, user?.role]
+  );
 
   async function loadData() {
     console.group("%c[Admin Dashboard Diagnostics]", "color:#0bf;font-weight:bold;");
@@ -35,31 +41,25 @@ export default function Admin() {
       setError(null);
 
       const token = localStorage.getItem("token");
-      console.log("🔑 Token:", token ? token.slice(0, 30) + "..." : "❌ none");
+      console.log("🔑 Token:", token ? token.slice(0, 30) + "…" : "❌ none");
+      console.log("👤 User:", user);
+      console.log("🛡️  isAdmin:", isAdmin);
+      console.log("📡 Backend:", API_URL);
 
       if (!token) {
         setError("Missing token. Please log in again.");
         return;
       }
 
-      console.log("📡 Backend:", API_URL);
-
+      const headers = { Authorization: `Bearer ${token}` };
       const usersUrl = `${API_URL}/admin/users`;
       const listingsUrl = `${API_URL}/admin/listings`;
       console.log("➡️ GET", usersUrl);
       console.log("➡️ GET", listingsUrl);
 
       const [uRes, lRes] = await Promise.all([
-        fetch(usersUrl, {
-          headers: { Authorization: `Bearer ${token}` },
-          mode: "cors",
-          credentials: "include",
-        }),
-        fetch(listingsUrl, {
-          headers: { Authorization: `Bearer ${token}` },
-          mode: "cors",
-          credentials: "include",
-        }),
+        fetch(usersUrl, { headers, mode: "cors", credentials: "include" }),
+        fetch(listingsUrl, { headers, mode: "cors", credentials: "include" }),
       ]);
 
       console.log("🔍 /admin/users:", uRes.status, uRes.statusText);
@@ -73,7 +73,7 @@ export default function Admin() {
         console.error("   listings->", lRes.status, lText);
 
         if (uRes.status === 404 || lRes.status === 404) {
-          setError("Admin endpoints are not implemented on the backend (/admin/users, /admin/listings).");
+          setError("Admin endpoints are not implemented (/admin/users, /admin/listings).");
         } else if (uRes.status === 403 || lRes.status === 403) {
           setError("Forbidden (403). Your account is not recognized as admin by the backend.");
         } else if (uRes.status === 401 || lRes.status === 401) {
@@ -84,11 +84,7 @@ export default function Admin() {
         return;
       }
 
-      const [usersData, listingsData] = await Promise.all([
-        uRes.json(),
-        lRes.json(),
-      ]);
-
+      const [usersData, listingsData] = await Promise.all([uRes.json(), lRes.json()]);
       console.log("✅ Users data:", usersData);
       console.log("✅ Listings data:", listingsData);
 
@@ -103,10 +99,35 @@ export default function Admin() {
     }
   }
 
+  // *** CRITICAL: self-gate — only fetch when confirmed admin ***
   useEffect(() => {
+    if (status === "loading") return;
+    if (!isAdmin) {
+      setLoading(false);
+      setError("Forbidden: admin role required.");
+      return;
+    }
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [API_URL]);
+  }, [status, isAdmin, API_URL]);
+
+  // Prevent UI flash while auth is loading
+  if (status === "loading") {
+    return (
+      <Layout>
+        <div className="p-6 text-gray-500 text-sm">Checking permissions…</div>
+      </Layout>
+    );
+  }
+
+  // Hard block for non-admins (no children rendered)
+  if (!isAdmin) {
+    return (
+      <Layout>
+        <div className="p-6 text-red-600 font-medium">403 — Not allowed.</div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>

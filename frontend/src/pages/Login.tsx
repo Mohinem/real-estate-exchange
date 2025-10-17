@@ -1,3 +1,4 @@
+// frontend/src/pages/Login.tsx
 import React, { useState } from 'react';
 import Layout from '../components/Layout';
 
@@ -15,15 +16,27 @@ export default function Login() {
     if (loading) return;
     setLoading(true);
     setError(undefined);
+
     try {
       const res = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
+
       if (!res.ok) throw new Error((await res.text()) || 'Login failed');
+
       const { token } = await res.json();
-      localStorage.setItem('jwt', token);
+      if (!token) throw new Error('Login succeeded but no token returned');
+
+      // ✅ Write BOTH keys to avoid breaking anything:
+      localStorage.setItem('token', token); // what AuthProvider expects
+      localStorage.setItem('jwt', token);   // backward-compat with any old reads
+
+      // Optional tiny debug (harmless in prod)
+      // console.debug('[Login] token set (head):', token.slice(0, 30) + '…');
+
+      // Keep existing behavior: hard redirect to home
       location.href = '/';
     } catch (err: any) {
       setError(err?.message || String(err));
