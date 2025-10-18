@@ -29,6 +29,9 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [deletingUserId, setDeletingUserId] = useState<number | null>(null);
+  const [deletingListingId, setDeletingListingId] = useState<number | null>(null);
+
   const isAdmin = useMemo(
     () => status === "authed" && (user?.role === "app_admin" || user?.role === "admin"),
     [status, user?.role]
@@ -99,6 +102,108 @@ export default function Admin() {
     }
   }
 
+  // --- Delete handlers (Admin only) ---
+  async function onDeleteUser(id: number) {
+    const token = localStorage.getItem("token");
+    if (!token) return setError("Missing token. Please log in again.");
+
+    // Avoid removing the last admin by mistake – server enforces; we also warn here
+    const target = users.find((u) => u.id === id);
+    const reason = window.prompt(
+      `Optional: enter a reason for deleting user #${id} (${target?.email ?? "unknown"})`
+    )?.trim();
+
+    const confirmText = `Type DELETE to soft-delete user #${id}${
+      target?.email ? ` (${target.email})` : ""
+    }.`;
+    const confirmInput = window.prompt(confirmText);
+    if ((confirmInput || "").toUpperCase() !== "DELETE") return;
+
+    setDeletingUserId(id);
+    setError(null);
+
+    try {
+      // Optimistic UI (soft delete → remove row from list)
+      const prev = users;
+      setUsers((curr) => curr.filter((u) => u.id !== id));
+
+      const res = await fetch(`${API_URL}/admin/users/${id}${reason ? `?reason=${encodeURIComponent(reason)}` : ""}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+        mode: "cors",
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        // revert optimistic update on failure
+        setUsers(prev);
+        const body = await res.text().catch(() => "");
+        if (res.status === 409) {
+          setError("Cannot delete the last remaining admin.");
+        } else if (res.status === 404) {
+          setError("User not found or already deleted.");
+        } else if (res.status === 403) {
+          setError("Forbidden: admin privileges required.");
+        } else {
+          setError(`Failed to delete user. ${body || ""}`);
+        }
+      }
+    } catch (e: any) {
+      setError(e?.message || "Failed to delete user.");
+    } finally {
+      setDeletingUserId(null);
+    }
+  }
+
+  async function onDeleteListing(id: number) {
+    const token = localStorage.getItem("token");
+    if (!token) return setError("Missing token. Please log in again.");
+
+    const target = listings.find((l) => l.id === id);
+    const reason = window.prompt(
+      `Optional: enter a reason for deleting listing #${id} (${target?.title ?? "untitled"})`
+    )?.trim();
+
+    if (!window.confirm(`Delete listing #${id}${target?.title ? ` (${target.title})` : ""}? This cannot be undone.`))
+      return;
+
+    setDeletingListingId(id);
+    setError(null);
+
+    try {
+      // Optimistic UI
+      const prev = listings;
+      setListings((curr) => curr.filter((l) => l.id !== id));
+
+      const res = await fetch(
+        `${API_URL}/admin/listings/${id}${reason ? `?reason=${encodeURIComponent(reason)}` : ""}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+          mode: "cors",
+          credentials: "include",
+        }
+      );
+
+      if (!res.ok) {
+        // revert on failure
+        setListings(prev);
+        const body = await res.text().catch(() => "");
+        if (res.status === 404) {
+          setError("Listing not found.");
+        } else if (res.status === 403) {
+          setError("Forbidden: admin privileges required.");
+        } else {
+          setError(`Failed to delete listing. ${body || ""}`);
+        }
+      }
+    } catch (e: any) {
+      setError(e?.message || "Failed to delete listing.");
+    } finally {
+      setDeletingListingId(null);
+    }
+  }
+
   // *** CRITICAL: self-gate — only fetch when confirmed admin ***
   useEffect(() => {
     if (status === "loading") return;
@@ -164,6 +269,7 @@ export default function Admin() {
                       <th className="p-2">Email</th>
                       <th className="p-2">Name</th>
                       <th className="p-2">Role</th>
+                      <th className="p-2 w-28">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -173,11 +279,21 @@ export default function Admin() {
                         <td className="p-2">{u.email}</td>
                         <td className="p-2">{u.display_name}</td>
                         <td className="p-2">{u.role}</td>
+                        <td className="p-2">
+                          <button
+                            className="px-2 py-1 rounded bg-red-600 text-white disabled:opacity-50"
+                            onClick={() => onDeleteUser(u.id)}
+                            disabled={deletingUserId === u.id}
+                            title="Soft delete (anonymize) this user"
+                          >
+                            {deletingUserId === u.id ? "Deleting…" : "Delete"}
+                          </button>
+                        </td>
                       </tr>
                     ))}
                     {!users.length && (
                       <tr>
-                        <td className="p-2 text-gray-500" colSpan={4}>
+                        <td className="p-2 text-gray-500" colSpan={5}>
                           No users found.
                         </td>
                       </tr>
@@ -199,6 +315,7 @@ export default function Admin() {
                       <th className="p-2">Location</th>
                       <th className="p-2">Price</th>
                       <th className="p-2">Type</th>
+                      <th className="p-2 w-28">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -211,11 +328,21 @@ export default function Admin() {
                           {l.price} {l.currency}
                         </td>
                         <td className="p-2">{l.propertyType}</td>
+                        <td className="p-2">
+                          <button
+                            className="px-2 py-1 rounded bg-red-600 text-white disabled:opacity-50"
+                            onClick={() => onDeleteListing(l.id)}
+                            disabled={deletingListingId === l.id}
+                            title="Hard delete this listing"
+                          >
+                            {deletingListingId === l.id ? "Deleting…" : "Delete"}
+                          </button>
+                        </td>
                       </tr>
                     ))}
                     {!listings.length && (
                       <tr>
-                        <td className="p-2 text-gray-500" colSpan={5}>
+                        <td className="p-2 text-gray-500" colSpan={6}>
                           No listings found.
                         </td>
                       </tr>

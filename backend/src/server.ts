@@ -1002,6 +1002,222 @@ app.get("/admin/listings", parseJwt, requireAuth, async (req, res) => {
   }
 });
 
+// DELETE /admin/users/:id  -> soft delete user (anonymize; ACID; admin-only)
+app.delete("/admin/users/:id", parseJwt, requireAuth, async (req: any, res) => {
+  if (!assertAdmin(req, res)) return;
+
+  const adminId = Number(req?.jwt?.user_id);
+  const targetId = Number(req.params.id);
+  const reason = (req.query.reason as string) ?? (req.body?.reason as string) ?? null;
+
+  if (!Number.isInteger(targetId) || targetId <= 0) {
+    return res.status(400).json({ error: "bad id" });
+  }
+
+  // Run with RLS using the caller's JWT so DB policies can enforce admin-only delete
+  try {
+    const result = await withRlsClient(req.jwt, async (c) => {
+      await c.query("begin");
+
+      // Block deleting the last remaining admin
+      const adminCountQ = await c.query(
+        `select count(*)::int as c
+           from app_public.users
+          where is_admin = true
+            and (deleted_at is null or deleted_at is distinct from deleted_at)` // tolerate missing column in dev
+      );
+      const lastAdmin = (adminCountQ.rows[0]?.c ?? 0) <= 1;
+      if (lastAdmin) {
+        const t = await c.query(`select is_admin from app_public.users where id=$1`, [targetId]);
+        if (t.rows[0]?.is_admin) {
+          await c.query("rollback");
+          return { ok: false, code: 409, error: "cannot delete the last remaining admin" };
+        }
+      }
+
+      // Soft delete + anonymize (requires deleted_at,is_active). If these columns don't exist, this will error.
+      const upd = await c.query(
+        `
+        update app_public.users u
+           set deleted_at = now(),
+               is_active  = false,
+               email       = ('deleted+'||u.id||'@example.invalid'),
+               display_name= 'Deleted User',
+               updated_at  = now()
+         where u.id = $1
+           and (u.deleted_at is null or u.deleted_at is distinct from u.deleted_at)
+        `,
+        [targetId]
+      );
+
+      // Optional: audit (uncomment if you created app_private.admin_audit)
+      // await c.query(
+      //   `insert into app_private.admin_audit(admin_id, action, target_type, target_id, reason)
+      //    values ($1,'soft_delete','user',$2,$3)`,
+      //   [adminId, targetId, reason]
+      // );
+
+      await c.query("commit");
+      return { ok: true, affected: upd.rowCount ?? 0 };
+    });
+
+    if (!result.ok) {
+      const code = result.code ?? 500;
+      return res.status(code).json({ error: result.error || "delete_failed" });
+    }
+
+    // Idempotent: if already soft-deleted, affected may be 0
+    return res.json({ ok: true, id: targetId, softDeleted: (result.affected ?? 0) > 0, reason });
+  } catch (e: any) {
+    console.error("DELETE /admin/users/:id failed:", e);
+    return res.status(500).json({ error: "delete_failed", detail: String(e?.message ?? e) });
+  }
+});
+
+// DELETE /admin/listings/:id  -> hard delete listing (ACID; admin-only; FK cascades handle dependents)
+app.delete("/admin/listings/:id", parseJwt, requireAuth, async (req: any, res) => {
+  const startedAt = new Date();
+  const traceId = `adm-del-${startedAt.getTime()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  // ---- Incoming / auth context
+  console.group(`\x1b[36m[ADMIN DELETE LISTING] ${traceId}\x1b[0m`);
+  console.log("➡️  params.id:", req.params?.id);
+  console.log("➡️  query:", req.query);
+  console.log("🔐 jwt:", req?.jwt);
+  console.log("🧩 role:", req?.jwt?.role, " user_id:", req?.jwt?.user_id);
+
+  if (!assertAdmin(req, res)) {
+    console.warn("⛔ assertAdmin failed");
+    console.groupEnd();
+    return;
+  }
+
+  const listingId = Number(req.params.id);
+  const reason = (req.query.reason as string) ?? (req.body?.reason as string) ?? null;
+  const debug = String(req.query.debug ?? "0") === "1";
+
+  if (!Number.isInteger(listingId) || listingId <= 0) {
+    console.warn("⛔ bad id");
+    console.groupEnd();
+    return res.status(400).json({ error: "bad id" });
+  }
+
+  try {
+    const result = await withRlsClient(req.jwt, async (c) => {
+      // ---- Show effective RLS context from PG side
+      const rlsCtx = await c.query(`
+        select
+          current_user                         as current_user,
+          session_user                         as session_user,
+          current_setting('jwt.claims.user_id', true) as jwt_uid,
+          current_setting('jwt.claims.role', true)    as jwt_role
+      `);
+      console.log("🧵 RLS context:", rlsCtx.rows[0]);
+
+      await c.query("begin");
+      console.log("🔸 begin txn");
+
+      // ---- Precheck: does the listing exist and what could block delete?
+      const pre = await c.query(
+        `
+        select
+          l.id,
+          l.reserved_exchange_id,
+          l.is_active,
+          (select count(*) from app_public.images            i where i.listing_id = l.id) as images,
+          (select count(*) from app_public.exchange_requests er where er.from_listing_id = l.id or er.to_listing_id = l.id) as exchange_requests,
+          (select count(*) from app_public.exchanges         ex where ex.listing_a_id = l.id or ex.listing_b_id = l.id) as exchanges
+        from app_public.listings l
+        where l.id = $1
+        for update
+        `,
+        [listingId]
+      );
+
+      if (!pre.rowCount) {
+        console.warn("⚠️  listing not found (or not visible via RLS)");
+        await c.query("rollback");
+        return { ok: false, code: 404, error: "not found or not visible via RLS" };
+      }
+
+      console.log("🔍 precheck:", pre.rows[0]);
+
+      // ---- Attempt delete
+      let del;
+      try {
+        del = await c.query(`delete from app_public.listings where id=$1`, [listingId]);
+        console.log("🗑️  delete rowCount:", del.rowCount);
+      } catch (pgErr: any) {
+        // Capture rich PG error info
+        console.error("🔥 PG delete error:", {
+          message: pgErr?.message,
+          code: pgErr?.code,
+          detail: pgErr?.detail,
+          hint: pgErr?.hint,
+          table: pgErr?.table,
+          constraint: pgErr?.constraint,
+          schema: pgErr?.schema,
+        });
+        await c.query("rollback");
+        return {
+          ok: false,
+          code: 500,
+          error: "pg_delete_error",
+          pg: {
+            message: pgErr?.message,
+            code: pgErr?.code,
+            detail: pgErr?.detail,
+            hint: pgErr?.hint,
+            table: pgErr?.table,
+            constraint: pgErr?.constraint,
+            schema: pgErr?.schema,
+          },
+        };
+      }
+
+      await c.query("commit");
+      console.log("✅ commit txn");
+
+      if ((del.rowCount ?? 0) === 0) {
+        console.warn("⚠️  commit ok but rowCount=0 (RLS blocked or already deleted?)");
+        return { ok: false, code: 404, error: "not found" };
+      }
+
+      return {
+        ok: true,
+        affected: del.rowCount ?? 0,
+        pre: debug ? pre.rows[0] : undefined,
+        rls: debug ? rlsCtx.rows[0] : undefined,
+      };
+    });
+
+    // ---- Return & logging
+    if (!result.ok) {
+      console.warn("⛔ result not ok:", result);
+      console.groupEnd();
+      return res
+        .status(result.code || 500)
+        .json(debug ? result : { error: result.error || "delete_failed" });
+    }
+
+    console.log("🎉 success:", { id: listingId, affected: result.affected });
+    console.groupEnd();
+    return res.json(
+      debug
+        ? { ok: true, id: listingId, reason, affected: result.affected, pre: result.pre, rls: result.rls }
+        : { ok: true, id: listingId, reason }
+    );
+  } catch (e: any) {
+    console.error("💥 DELETE /admin/listings/:id exception:", e?.message, e?.stack);
+    console.groupEnd();
+    return res.status(500).json({ error: "delete_failed", detail: String(e?.message ?? e) });
+  } finally {
+    const durMs = Date.now() - startedAt.getTime();
+    console.log(`⏱️  [${traceId}] done in ${durMs}ms`);
+  }
+});
+// ================== END ADMIN DELETES ==================
+
 // (Optional) CANCEL active exchange (mutual or admin flow) — mark active->cancelled and unreserve listings.
 
 
