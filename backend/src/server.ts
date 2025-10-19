@@ -10,15 +10,37 @@ import authRouter from "./auth";
 
 const app = express();
 
-// --- ✅ Force CORS headers manually ---
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "http://localhost:5173");
-  res.header("Access-Control-Allow-Credentials", "true");
-  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  if (req.method === "OPTIONS") return res.sendStatus(200);
-  next();
-});
+// ---- CORS (env-driven, supports *.vercel.app) ----
+const raw = process.env.CORS_ORIGINS ?? "";
+const ALLOWED_ORIGINS = raw.split(",").map(s => s.trim()).filter(Boolean);
+
+function isAllowed(origin: string) {
+  return ALLOWED_ORIGINS.some(o => {
+    if (o.startsWith("*.")) {
+      // allow any subdomain of the suffix, e.g. *.vercel.app
+      const suffix = o.slice(1); // ".vercel.app"
+      return origin.endsWith(suffix);
+    }
+    return origin === o;
+  });
+}
+
+const corsOptions: cors.CorsOptions = {
+  origin(origin, cb) {
+    // allow requests with no origin (curl/Postman)
+    if (!origin) return cb(null, true);
+    if (isAllowed(origin)) return cb(null, true);
+    console.log("❌ CORS blocked:", origin, "not in", ALLOWED_ORIGINS);
+    return cb(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  maxAge: 86400,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 // CORS
 // const allowed = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
