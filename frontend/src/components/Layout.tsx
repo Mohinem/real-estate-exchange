@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 
 function decodeJwtPayload<T = any>(token: string): T | null {
   try {
@@ -31,16 +31,17 @@ function navClass({ isActive }: { isActive: boolean }) {
 export default function Layout({ children }: Props) {
   const [authed, setAuthed] = React.useState<boolean>(!!localStorage.getItem("jwt"));
   const [userName, setUserName] = React.useState<string | null>(null);
-  const [unseen, setUnseen] = React.useState<number>(0); // badge for received swaps
+  const [unseen, setUnseen] = React.useState<number>(0);
+  const navigate = useNavigate();
 
-  // watch login/logout across tabs
+  // Watch login/logout across tabs
   React.useEffect(() => {
     const onStorage = () => setAuthed(!!localStorage.getItem("jwt"));
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  // derive display name from JWT
+  // Derive display name from JWT
   React.useEffect(() => {
     const token = localStorage.getItem("jwt");
     if (!token) {
@@ -57,7 +58,7 @@ export default function Layout({ children }: Props) {
     setUserName(name);
   }, [authed]);
 
-  // poll unseen count for received swaps; refresh on focus & cross-tab invalidations
+  // Poll unseen count for received swaps
   React.useEffect(() => {
     let timer: number | undefined;
 
@@ -85,7 +86,6 @@ export default function Layout({ children }: Props) {
     refresh();
     window.addEventListener("focus", onFocus);
     window.addEventListener("storage", onStorage);
-    // gentle poll
     timer = window.setInterval(refresh, 15000);
 
     return () => {
@@ -95,19 +95,19 @@ export default function Layout({ children }: Props) {
     };
   }, [authed]);
 
-  function logout() {
+  // ✅ Fixed logout (client-side navigation, no reload)
+  function logout(e?: React.MouseEvent) {
+    e?.preventDefault?.();
     localStorage.removeItem("jwt");
     try {
-      // notify other tabs to clear badges/state
       localStorage.setItem("swaps:invalidate", String(Date.now()));
     } catch {}
     setAuthed(false);
     setUserName(null);
-    window.location.href = "/login";
+    navigate("/login", { replace: true });
   }
 
   return (
-    // Make the whole page a column that fills the viewport
     <div className="min-h-screen flex flex-col bg-gray-50">
       {/* Header */}
       <header className="border-b bg-white">
@@ -163,7 +163,10 @@ export default function Layout({ children }: Props) {
               </div>
             )}
             {authed ? (
-              <button onClick={logout} className="rounded-md border px-3 py-1.5 text-sm">
+              <button
+                onClick={logout}
+                className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50 transition"
+              >
                 Logout
               </button>
             ) : (
@@ -173,7 +176,7 @@ export default function Layout({ children }: Props) {
                 </Link>
                 <Link
                   to="/register"
-                  className="rounded-md bg-[--color-brand-500] px-3 py-1.5 text-sm text-white"
+                  className="rounded-md bg-[--color-brand-500] px-3 py-1.5 text-sm text-white hover:bg-[--color-brand-600]"
                 >
                   Sign up
                 </Link>
@@ -183,10 +186,10 @@ export default function Layout({ children }: Props) {
         </div>
       </header>
 
-      {/* Content grows to push footer down */}
+      {/* Main */}
       <main className="flex-1">{children}</main>
 
-      {/* Footer pinned to bottom */}
+      {/* Footer */}
       <footer className="border-t bg-white">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 text-sm text-gray-600 flex items-center justify-between">
           <div>© {new Date().getFullYear()} Real Estate Exchange.</div>
