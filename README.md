@@ -1,58 +1,123 @@
-# Real Estate Exchange — TS/Node + React/Neon
+# 🏠 Real Estate Exchange
 
+A full-stack property exchange platform that allows users to **list, browse, and swap real estate** — complete with secure authentication, admin controls, and a modern UI.
 
-## Prereqs
-- Node 20+
-- A Neon Postgres database (SSL required)
-- psql installed locally (or use Neon SQL Editor)
+---
 
+## 🚀 Tech Stack
 
-## 1) Backend setup
-```bash
-cd backend
-cp .env.example .env
-# Fill DATABASE_URL (Neon) + JWT_SECRET
-npm i
-npm run db:schema
-npm run db:seed
-npm run dev
-```
-GraphQL will be at `http://localhost:$PORT/graphql` (default 8080).
+### Frontend (Vercel Deployment)
+- ⚛️ React + TypeScript + Vite  
+- 🎨 Tailwind CSS v4  
+- 🧭 React Router  
+- ☁️ Hosted on Vercel
 
+### Backend (Render Deployment)
+- 🟢 Node.js (v22) + Express  
+- 🗄️ PostgreSQL (Neon)  
+- 🧩 PostGraphile-style schema with RLS  
+- 🔐 JWT-based authentication  
+- ☁️ Hosted on Render
 
-### Auth
-- `register(email, password, display_name)` — creates a user
-- `login(email, password)` — returns a signed JWT (string). Store in localStorage as `jwt` and use `Authorization: Bearer <token>`
+---
 
+## 🌐 Live Demo
+- **Frontend:** https://real-estate-exchange.vercel.app  
+- **Backend API:** https://real-estate-exchange.onrender.com
 
-## 2) Frontend setup
-```bash
-cd frontend
-cp .env.example .env
-# Set VITE_GRAPHQL_URL to backend URL
-npm i
-npm run dev
-```
+---
 
+## ⚙️ Deployment Overview
 
-## Matching
-The DB function `suggest_matches(listing_id, price_percent)` returns listings within ±price_percent range of a base listing.
+### 🖥️ Backend (Render)
 
+**Root Directory:** `backend/`  
 
-## Image Uploads
-For demo we use browser object URLs. In production, integrate S3/Cloudinary; store the final URLs in `images` table via GraphQL mutations.
+**Build Command:**  
+npm ci --include=dev && npm run build  
 
+**Start Command:**  
+npm run start  
 
-## Deployment
-- **Backend**: deploy on Render/Fly/railway; set `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS`. For Vercel serverless, use `@graphile/worker` alternative or a small Node server on a compatible host.
-- **Frontend**: deploy on Vercel; set `VITE_GRAPHQL_URL` to deployed backend.
-- **Database**: Neon free tier is perfect; ensure `sslmode=require` in `DATABASE_URL`.
+**Environment Variables:**  
+NODE_ENV=production  
+CORS_ORIGINS=https://real-estate-exchange.vercel.app,*.vercel.app,http://localhost:5173  
+DATABASE_URL=<your_postgres_url>  
+JWT_SECRET=<your_secret>  
+NPM_CONFIG_PRODUCTION=false  
 
+⚠️ Render free-tier apps sleep after inactivity (30–50 s cold start).
 
-## Admin & Moderation
-- Mark admins by setting `is_admin=true` on user rows. JWT will carry role `admin` and RLS policies allow broader access.
+---
 
+### 💻 Frontend (Vercel)
 
-## Notes
-- RLS ensures users can only edit their resources.
-- Connection filter plugin enables robust filtering & pagination via `allListings(filter:{...})`.
+**Root Directory:** `frontend/`  
+
+**Build Command:**  
+npm run build  
+
+**Output Directory:**  
+dist  
+
+**Environment Variable:**  
+VITE_API_URL=https://real-estate-exchange.onrender.com  
+
+**Vercel SPA Routing (`vercel.json`):**  
+{
+  "version": 2,
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
+}
+
+---
+
+## 🔐 Authentication
+- JWT stored in localStorage  
+- Login and registration via /auth/login and /auth/register  
+- Role-based RLS policies (app_user, app_admin) enforced in Postgres  
+
+---
+
+## 🧩 Features
+- 🔑 **User Authentication** – Secure JWT login and registration  
+- 🏘️ **Property Listings** – Create, edit, delete, and browse listings  
+- 🔄 **Exchange Proposals** – Swap properties or propose cash adjustments  
+- 🗂️ **Admin Access** – Manage all listings through RLS  
+- 📨 **Messaging** – Exchange messages between users for active proposals  
+- 🖼️ **Image Previews** – Local preview before upload  
+
+---
+
+## 🧰 Development Setup
+
+1️⃣ **Clone the repo**  
+git clone https://github.com/Mohinem/real-estate-exchange.git  
+cd real-estate-exchange  
+
+2️⃣ **Backend**  
+cd backend  
+npm install  
+npm run dev  
+
+3️⃣ **Frontend**  
+cd ../frontend  
+npm install  
+npm run dev  
+
+4️⃣ **Visit**  
+http://localhost:5173  
+
+---
+
+## 🧠 Author
+**Mohit Kumar Basak**  
+Full-stack Developer & Independent Researcher  
+GitHub: [https://github.com/Mohinem](https://github.com/Mohinem)
+
+---
+
+## 🪪 License
+Licensed under the **MIT License** – see the LICENSE file for details.
