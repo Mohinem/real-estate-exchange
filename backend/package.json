@@ -1,7 +1,6 @@
 {
   "name": "real-estate-exchange-backend",
   "version": "1.0.0",
-  "type": "module",
   "scripts": {
     "dev": "tsx src/server.ts",
     "build": "tsc -p tsconfig.json",
