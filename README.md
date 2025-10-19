@@ -34,11 +34,14 @@ A full-stack property exchange platform that allows users to **list, browse, and
 
 **Root Directory:** `backend/`
 
-**Build Command:**
-```bash
-npm ci --include=dev && npm run build```
+**Build Command:** `npm ci --include=dev && npm run build`
 
-**Start Command:**
-```bash
-npm run start
+**Start Command:** `npm run start`
 
+**Environment Variables:** 
+`NODE_ENV=production
+CORS_ORIGINS=https://real-estate-exchange.vercel.app,*.vercel.app,http://localhost:5173
+DATABASE_URL=<your_postgres_url>
+JWT_SECRET=<your_secret>
+NPM_CONFIG_PRODUCTION=false
+`
