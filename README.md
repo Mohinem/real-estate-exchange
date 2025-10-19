@@ -36,4 +36,9 @@ A full-stack property exchange platform that allows users to **list, browse, and
 
 **Build Command:**
 ```bash
-npm ci --include=dev && npm run build
+npm ci --include=dev && npm run build```
+
+**Start Command:**
+```bash
+npm run start
+
