@@ -39,13 +39,9 @@ A full-stack property exchange platform that allows users to **list, browse, and
 **Start Command:** `npm run start`
 
 **Environment Variables:** 
-`NODE_ENV=production
-
-CORS_ORIGINS=https://real-estate-exchange.vercel.app,*.vercel.app,http://localhost:5173
-
-DATABASE_URL=<your_postgres_url>
-
-JWT_SECRET=<your_secret>
-
-NPM_CONFIG_PRODUCTION=false
+`NODE_ENV=production`
+`CORS_ORIGINS=https://real-estate-exchange.vercel.app,*.vercel.app,http://localhost:5173`
+`DATABASE_URL=<your_postgres_url>`
+`JWT_SECRET=<your_secret>`
+`NPM_CONFIG_PRODUCTION=false`
 `
