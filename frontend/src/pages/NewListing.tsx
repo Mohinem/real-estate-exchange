@@ -1,5 +1,6 @@
 import React from "react";
 import Layout from "../components/Layout";
+import { useNavigate } from "react-router-dom";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
@@ -15,7 +16,10 @@ type FormState = {
 };
 
 export default function NewListing() {
-  const token = typeof window !== "undefined" ? localStorage.getItem("jwt") : null;
+  const navigate = useNavigate();
+
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("jwt") : null;
   const isAuthed = !!token;
 
   const [form, setForm] = React.useState<FormState>({
@@ -64,7 +68,8 @@ export default function NewListing() {
 
     if (!form.title.trim()) return setErr("Please provide a title.");
     if (!form.location.trim()) return setErr("Please provide a location.");
-    if (!form.price || Number(form.price) <= 0) return setErr("Please set a valid price.");
+    if (!form.price || Number(form.price) <= 0)
+      return setErr("Please set a valid price.");
 
     setSubmitting(true);
     try {
@@ -89,7 +94,6 @@ export default function NewListing() {
       });
 
       if (!res.ok) {
-        // Map auth errors to friendly text; avoid exposing backend internals
         if (res.status === 401 || res.status === 403) {
           throw new Error("You must be logged in to create a listing.");
         }
@@ -97,7 +101,8 @@ export default function NewListing() {
       }
 
       setOkMsg("Listing created successfully!");
-      setTimeout(() => (location.href = "/dashboard"), 600);
+      // ✅ Client-side navigation (no hard reload → no Vercel 404)
+      setTimeout(() => navigate("/dashboard", { replace: true }), 400);
     } catch (e: any) {
       setErr(e?.message || "Could not create listing. Please try again.");
     } finally {
@@ -114,7 +119,8 @@ export default function NewListing() {
             Create a new listing
           </h1>
           <p className="mt-3 max-w-2xl text-gray-600 text-base sm:text-lg">
-            Add your property to the marketplace. You can edit details later from your dashboard.
+            Add your property to the marketplace. You can edit details later
+            from your dashboard.
           </p>
         </div>
       </section>
@@ -130,12 +136,13 @@ export default function NewListing() {
             {!isAuthed && (
               <div className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                 <div>You must be logged in to create a listing.</div>
-                <a
-                  href="/login"
+                <button
+                  type="button"
+                  onClick={() => navigate("/login")}
                   className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-white hover:bg-blue-700"
                 >
                   Login
-                </a>
+                </button>
               </div>
             )}
 
@@ -154,7 +161,9 @@ export default function NewListing() {
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               {/* Title */}
               <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-gray-700">Title</label>
+                <label className="block text-sm font-medium text-gray-700">
+                  Title
+                </label>
                 <input
                   className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
                   placeholder="e.g., 2BHK near Salt Lake"
@@ -166,7 +175,9 @@ export default function NewListing() {
 
               {/* Description */}
               <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-gray-700">Description</label>
+                <label className="block text-sm font-medium text-gray-700">
+                  Description
+                </label>
                 <textarea
                   rows={5}
                   className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
@@ -178,7 +189,9 @@ export default function NewListing() {
 
               {/* Price */}
               <div>
-                <label className="block text-sm font-medium text-gray-700">Price</label>
+                <label className="block text-sm font-medium text-gray-700">
+                  Price
+                </label>
                 <input
                   type="number"
                   min={0}
@@ -193,7 +206,9 @@ export default function NewListing() {
 
               {/* Currency */}
               <div>
-                <label className="block text-sm font-medium text-gray-700">Currency</label>
+                <label className="block text-sm font-medium text-gray-700">
+                  Currency
+                </label>
                 <input
                   className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
                   placeholder="INR"
@@ -204,7 +219,9 @@ export default function NewListing() {
 
               {/* Location */}
               <div>
-                <label className="block text-sm font-medium text-gray-700">Location</label>
+                <label className="block text-sm font-medium text-gray-700">
+                  Location
+                </label>
                 <input
                   className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
                   placeholder="Kolkata, WB"
@@ -216,12 +233,17 @@ export default function NewListing() {
 
               {/* Property Type */}
               <div>
-                <label className="block text-sm font-medium text-gray-700">Property Type</label>
+                <label className="block text-sm font-medium text-gray-700">
+                  Property Type
+                </label>
                 <select
                   className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
                   value={form.property_type}
                   onChange={(e) =>
-                    update("property_type", e.target.value as FormState["property_type"])
+                    update(
+                      "property_type",
+                      e.target.value as FormState["property_type"]
+                    )
                   }
                 >
                   <option value="apartment">apartment</option>
@@ -260,11 +282,14 @@ export default function NewListing() {
 
               {/* Images */}
               <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-gray-700">Images</label>
+                <label className="block text-sm font-medium text-gray-700">
+                  Images
+                </label>
                 <div className="mt-2 rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-5">
                   <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-sm text-gray-600">
-                      Upload up to 12 images. We’ll preview locally (no upload yet).
+                      Upload up to 12 images. We’ll preview locally (no upload
+                      yet).
                     </p>
                     <label className="inline-flex cursor-pointer items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
                       <input
@@ -290,7 +315,9 @@ export default function NewListing() {
                           <button
                             type="button"
                             onClick={() =>
-                              setImages((prev) => prev.filter((_, idx) => idx !== i))
+                              setImages((prev) =>
+                                prev.filter((_, idx) => idx !== i)
+                              )
                             }
                             className="absolute right-1 top-1 rounded-md bg-black/60 px-2 py-0.5 text-xs text-white opacity-0 transition group-hover:opacity-100"
                             title="Remove"
@@ -310,17 +337,22 @@ export default function NewListing() {
 
             {/* Actions */}
             <div className="mt-8 flex items-center justify-end gap-3">
-              <a
-                href="/dashboard"
+              <button
+                type="button"
+                onClick={() => navigate("/dashboard")}
                 className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
                 Cancel
-              </a>
+              </button>
               <button
                 type="submit"
                 disabled={submitting}
                 className={`inline-flex items-center rounded-lg px-5 py-2 text-sm font-medium text-white transition
-                  ${submitting ? "bg-blue-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}
+                  ${
+                    submitting
+                      ? "bg-blue-400 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700"
+                  }
                 `}
               >
                 {submitting && (
@@ -330,8 +362,19 @@ export default function NewListing() {
                     fill="none"
                     xmlns="http://www.w3.org/2000/svg"
                   >
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" fill="currentColor" />
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                      fill="currentColor"
+                    />
                   </svg>
                 )}
                 {submitting ? "Creating…" : "Create"}
