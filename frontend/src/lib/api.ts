@@ -1,27 +1,37 @@
-// lightweight fetch helper that adds JWT and parses JSON
-export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
+// frontend/src/lib/api.ts
+// Lightweight fetch helper that adds JWT and parses JSON safely
+export const API_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:8080";
 
-function authHeader() {
+/** Build headers without including undefined values. */
+function buildHeaders(extra?: HeadersInit): Headers {
+  const h = new Headers(extra);
+  h.set("Content-Type", "application/json");
   const jwt = localStorage.getItem("jwt");
-  return jwt ? { Authorization: `Bearer ${jwt}` } : {};
+  if (jwt) h.set("Authorization", `Bearer ${jwt}`);
+  return h;
 }
 
-export async function api<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
+/** Generic API helper returning parsed JSON or throwing a descriptive error. */
+export async function api<T = any>(
+  path: string,
+  opts: RequestInit = {}
+): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...opts,
-    headers: {
-      "Content-Type": "application/json",
-      ...(opts.headers || {}),
-      ...authHeader(),
-    },
+    headers: buildHeaders(opts.headers),
   });
+
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
     try {
       const j = await res.json();
       if (j?.error) msg = j.error;
-    } catch {}
+    } catch {
+      /* ignore JSON parse failure */
+    }
     throw new Error(msg);
   }
+
   return res.json();
 }
